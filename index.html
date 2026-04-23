@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Despedida Marsianas 👽💍 · Cartagena</title>
+  <!-- Supabase client for realtime sync -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <!-- PWA: permite instalar como app en el celu -->
   <meta name="theme-color" content="#FF3D8A"/>
   <meta name="mobile-web-app-capable" content="yes"/>
@@ -143,6 +145,15 @@
     backdrop-filter:blur(10px);
   }
   .topbar-left{display:flex;align-items:center;gap:10px}
+  .topbar-right{display:flex;align-items:center;gap:10px}
+  .connection-indicator{
+    font-size:8px;
+    transition:color 0.3s ease;
+    cursor:default;
+  }
+  .connection-indicator.connected{
+    color:#0BCE91;
+  }
   .me-av{
     width:36px;height:36px;border-radius:12px;
     display:flex;align-items:center;justify-content:center;
@@ -878,7 +889,10 @@
         <div class="me-role" id="meRole">marciana</div>
       </div>
     </div>
-    <button class="logout" id="logoutBtn">Salir</button>
+    <div class="topbar-right">
+      <div id="connectionStatus" class="connection-indicator" title="Estado de sincronización">🔴</div>
+      <button class="logout" id="logoutBtn">Salir</button>
+    </div>
   </header>
 
   <!-- HERO -->
@@ -923,7 +937,7 @@
   <section class="panel" id="p-check"></section>
   <section class="panel" id="p-gal"></section>
 
-  <div class="footer">hecho con <span class="heart">♥</span> para Mars · v0.2 🚀</div>
+  <div class="footer">hecho con <span class="heart">♥</span> para Mars · v0.3 🌐</div>
 </main>
 
 <!-- ============ MODAL: NUEVO GASTO ============ -->
@@ -1295,6 +1309,87 @@ const KEY_ITIN_EXTRA = 'marsianas:itin_extra';
 const KEY_TRIVIA_SELECTED = 'marsianas:trivia_selected';
 const KEY_TRIVIA_SCORE = 'marsianas:trivia_score';
 
+// ================= SUPABASE CONFIGURATION =================
+const SUPABASE_URL = 'https://dehainqlrjvawguzktti.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_OdyYcbUkeLhxjoysWpgGDA_1h2_gT2c'; // public key, safe for GitHub
+let db;
+let isSupabaseConnected = false;
+
+// Initialize Supabase client
+function initSupabase() {
+  try {
+    db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    isSupabaseConnected = true;
+    console.log('✅ Supabase connected');
+    
+    // Subscribe to realtime changes
+    subscribeToRealtimeUpdates();
+    
+    // Seed data if needed
+    seedDataIfNeeded();
+    
+    // Show connection indicator
+    showConnectionStatus(true);
+  } catch (error) {
+    console.error('❌ Supabase connection failed:', error);
+    isSupabaseConnected = false;
+    showConnectionStatus(false);
+  }
+}
+
+// Connection status indicator
+function showConnectionStatus(connected) {
+  const indicator = document.getElementById('connectionStatus');
+  if (!indicator) return;
+  indicator.classList.toggle('connected', connected);
+  indicator.title = connected ? 'Sincronizado 🟢' : 'Sin conexión 🔴';
+}
+
+// ================= REALTIME SUBSCRIPTIONS =================
+function subscribeToRealtimeUpdates() {
+  if (!db) return;
+
+  // Listen to gastos changes
+  db.channel('gastos-changes')
+    .on('postgres_changes', { event: '*', table: 'gastos' }, () => {
+      console.log('💸 Gastos data changed, refreshing...');
+      refreshGastosFromSupabase();
+    })
+    .subscribe();
+
+  // Listen to reservas changes  
+  db.channel('reservas-changes')
+    .on('postgres_changes', { event: '*', table: 'reservas' }, () => {
+      console.log('📍 Reservas data changed, refreshing...');
+      refreshReservasFromSupabase();
+    })
+    .subscribe();
+
+  // Listen to pendientes changes
+  db.channel('pendientes-changes')
+    .on('postgres_changes', { event: '*', table: 'pendientes' }, () => {
+      console.log('✅ Pendientes data changed, refreshing...');
+      refreshChecklistFromSupabase();
+    })
+    .subscribe();
+
+  // Listen to itinerario changes
+  db.channel('itinerario-changes')
+    .on('postgres_changes', { event: '*', table: 'itinerario_eventos' }, () => {
+      console.log('📅 Itinerario data changed, refreshing...');
+      refreshItinerarioFromSupabase();
+    })
+    .subscribe();
+
+  // Listen to trivia config changes
+  db.channel('trivia-changes')
+    .on('postgres_changes', { event: '*', table: 'trivia_config' }, () => {
+      console.log('🎯 Trivia data changed, refreshing...');
+      refreshTriviaFromSupabase();
+    })
+    .subscribe();
+}
+
 let currentUser = null;
 let gastos = [];
 let checkState = {};          // { "idx|cat|text": true }  (marked done)
@@ -1323,6 +1418,326 @@ function loadState(){
   try{ triviaSelected = JSON.parse(localStorage.getItem(KEY_TRIVIA_SELECTED) || '{}'); }catch(e){ triviaSelected = {}; }
   try{ triviaScore = JSON.parse(localStorage.getItem(KEY_TRIVIA_SCORE) || '{"a":0,"b":0}'); }catch(e){ triviaScore = {a:0,b:0}; }
 }
+
+// ================= SUPABASE DATA FUNCTIONS =================
+
+// Seed data if tables are empty
+async function seedDataIfNeeded() {
+  if (!db) return;
+  
+  try {
+    // Check if we need to seed reservas
+    const { data: reservasData, error: reservasError } = await db.from('reservas').select('*').limit(1);
+    if (!reservasError && reservasData.length === 0) {
+      console.log('🌱 Seeding reservas data...');
+      const reservasToInsert = RESERVAS.map((r, idx) => ({
+        icon: r.icon,
+        title: r.title,
+        meta: r.meta,
+        status: r.status || 'pending',
+        phone: r.phone || null,
+        base_key: `base_${idx}`
+      }));
+      await db.from('reservas').insert(reservasToInsert);
+    }
+
+    // Check if we need to seed pendientes
+    const { data: pendientesData, error: pendientesError } = await db.from('pendientes').select('*').limit(1);
+    if (!pendientesError && pendientesData.length === 0) {
+      console.log('🌱 Seeding pendientes data...');
+      const pendientesToInsert = CHECKLIST_DEFAULT.map((c, idx) => ({
+        cat: c.cat,
+        texto: c.text,
+        done_by: [],
+        hide_for_bride: c.hideForBride || false,
+        base_key: `base_${idx}`
+      }));
+      await db.from('pendientes').insert(pendientesToInsert);
+    }
+
+    console.log('✅ Data seeding completed');
+  } catch (error) {
+    console.error('❌ Error seeding data:', error);
+  }
+}
+
+// GASTOS functions
+async function saveGastoToSupabase(gasto) {
+  if (!db) return saveGastos(); // fallback to localStorage
+  
+  try {
+    const { error } = await db.from('gastos').insert({
+      desc: gasto.desc,
+      amount: gasto.amount,
+      paid_by: gasto.paidBy,
+      split: gasto.split,
+      exclude_bride: gasto.excludeBride
+    });
+    if (error) throw error;
+    console.log('💾 Gasto saved to Supabase');
+  } catch (error) {
+    console.error('❌ Error saving gasto:', error);
+    saveGastos(); // fallback
+  }
+}
+
+async function deleteGastoFromSupabase(gastoId) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('gastos').delete().eq('id', gastoId);
+    if (error) throw error;
+    console.log('🗑️ Gasto deleted from Supabase');
+  } catch (error) {
+    console.error('❌ Error deleting gasto:', error);
+  }
+}
+
+async function refreshGastosFromSupabase() {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('gastos').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    
+    // Convert Supabase data to our format
+    gastos = data.map(g => ({
+      id: g.id,
+      desc: g.desc,
+      amount: g.amount,
+      paidBy: g.paid_by,
+      split: g.split,
+      excludeBride: g.exclude_bride,
+      date: new Date(g.created_at).getTime()
+    }));
+    
+    renderGastos();
+    console.log('🔄 Gastos refreshed from Supabase');
+  } catch (error) {
+    console.error('❌ Error refreshing gastos:', error);
+  }
+}
+
+// RESERVAS functions
+async function toggleResStatusInSupabase(baseKey, newStatus) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('reservas').update({ status: newStatus }).eq('base_key', baseKey);
+    if (error) throw error;
+    console.log('🔄 Reserva status updated in Supabase');
+  } catch (error) {
+    console.error('❌ Error updating reserva status:', error);
+  }
+}
+
+async function addReservaToSupabase(reserva) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('reservas').insert({
+      icon: reserva.icon,
+      title: reserva.title,
+      meta: reserva.meta,
+      phone: reserva.phone,
+      status: 'pending'
+    });
+    if (error) throw error;
+    console.log('💾 Reserva added to Supabase');
+  } catch (error) {
+    console.error('❌ Error adding reserva:', error);
+  }
+}
+
+async function refreshReservasFromSupabase() {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('reservas').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    
+    // Update our local arrays based on Supabase data
+    resStatusOverrides = {};
+    resExtra = [];
+    
+    data.forEach(r => {
+      if (r.base_key) {
+        // This is a base reserva, update status if changed
+        const baseIdx = parseInt(r.base_key.replace('base_', ''));
+        if (RESERVAS[baseIdx]) {
+          resStatusOverrides[baseIdx] = r.status;
+        }
+      } else {
+        // This is a custom reserva
+        resExtra.push({
+          id: r.id,
+          icon: r.icon,
+          title: r.title,
+          meta: r.meta,
+          phone: r.phone,
+          status: r.status
+        });
+      }
+    });
+    
+    renderRes();
+    console.log('🔄 Reservas refreshed from Supabase');
+  } catch (error) {
+    console.error('❌ Error refreshing reservas:', error);
+  }
+}
+
+// PENDIENTES functions
+async function togglePendienteInSupabase(baseKey, userId, isDone) {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('pendientes').select('done_by').eq('base_key', baseKey).single();
+    if (error) throw error;
+    
+    const currentDoneBy = data.done_by || [];
+    let newDoneBy;
+    
+    if (isDone && !currentDoneBy.includes(userId)) {
+      newDoneBy = [...currentDoneBy, userId];
+    } else if (!isDone && currentDoneBy.includes(userId)) {
+      newDoneBy = currentDoneBy.filter(id => id !== userId);
+    } else {
+      return; // no change needed
+    }
+    
+    const { error: updateError } = await db.from('pendientes').update({ done_by: newDoneBy }).eq('base_key', baseKey);
+    if (updateError) throw updateError;
+    
+    console.log('✅ Pendiente updated in Supabase');
+  } catch (error) {
+    console.error('❌ Error updating pendiente:', error);
+  }
+}
+
+async function addPendienteToSupabase(pendiente) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('pendientes').insert({
+      cat: pendiente.cat,
+      texto: pendiente.text,
+      done_by: [],
+      hide_for_bride: false
+    });
+    if (error) throw error;
+    console.log('💾 Pendiente added to Supabase');
+  } catch (error) {
+    console.error('❌ Error adding pendiente:', error);
+  }
+}
+
+async function refreshChecklistFromSupabase() {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('pendientes').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    
+    // Reset our local state
+    checkState = {};
+    checkExtra = [];
+    
+    data.forEach(p => {
+      if (p.base_key) {
+        // This is a base checklist item
+        const baseIdx = parseInt(p.base_key.replace('base_', ''));
+        checkState[baseIdx] = p.done_by || [];
+      } else {
+        // This is a custom checklist item
+        checkExtra.push({
+          id: p.id,
+          cat: p.cat,
+          text: p.texto,
+          doneBy: p.done_by || [],
+          hideForBride: p.hide_for_bride
+        });
+      }
+    });
+    
+    renderCheck();
+    console.log('🔄 Checklist refreshed from Supabase');
+  } catch (error) {
+    console.error('❌ Error refreshing checklist:', error);
+  }
+}
+
+// TRIVIA functions
+async function saveTriviaStateToSupabase() {
+  if (!db) return;
+  
+  try {
+    // First try to get existing config
+    const { data: existing, error: selectError } = await db.from('trivia_config').select('*').limit(1);
+    
+    if (selectError && selectError.code !== 'PGRST116') { // not "no rows" error
+      throw selectError;
+    }
+    
+    const configData = {
+      selected_ids: Object.keys(triviaSelected),
+      score_a: triviaScore.a,
+      score_b: triviaScore.b
+    };
+    
+    if (existing && existing.length > 0) {
+      // Update existing
+      const { error } = await db.from('trivia_config').update(configData).eq('id', existing[0].id);
+      if (error) throw error;
+    } else {
+      // Insert new
+      const { error } = await db.from('trivia_config').insert(configData);
+      if (error) throw error;
+    }
+    
+    console.log('🎯 Trivia state saved to Supabase');
+  } catch (error) {
+    console.error('❌ Error saving trivia state:', error);
+    saveTriviaSelected(); // fallback
+    saveTriviaScore(); // fallback
+  }
+}
+
+async function refreshTriviaFromSupabase() {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('trivia_config').select('*').limit(1);
+    if (error) throw error;
+    
+    if (data && data.length > 0) {
+      const config = data[0];
+      
+      // Rebuild triviaSelected object
+      triviaSelected = {};
+      (config.selected_ids || []).forEach(id => {
+        triviaSelected[id] = true;
+      });
+      
+      // Update scores
+      triviaScore = {
+        a: config.score_a || 0,
+        b: config.score_b || 0
+      };
+      
+      console.log('🔄 Trivia config refreshed from Supabase');
+      
+      // Re-render if we're on the trivia page
+      if (document.querySelector('.panel.is-active')?.id === 'p-mars') {
+        renderMars();
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error refreshing trivia:', error);
+  }
+}
+
+// Fallback localStorage functions (kept for offline support)
 function saveGastos(){ try{ localStorage.setItem(KEY_GASTOS, JSON.stringify(gastos)); }catch(e){} }
 function saveCheck(){ try{ localStorage.setItem(KEY_CHECK, JSON.stringify(checkState)); }catch(e){} }
 function saveResStatus(){ try{ localStorage.setItem(KEY_RES_STATUS, JSON.stringify(resStatusOverrides)); }catch(e){} }
@@ -1415,6 +1830,14 @@ function enterApp(){
 
   renderAll();
   startCountdown();
+  
+  // Load data from Supabase after login
+  if (isSupabaseConnected) {
+    refreshGastosFromSupabase();
+    refreshReservasFromSupabase();
+    refreshChecklistFromSupabase();
+    refreshTriviaFromSupabase();
+  }
 }
 
 document.getElementById('logoutBtn').addEventListener('click',()=>{
@@ -1660,10 +2083,18 @@ function renderRes(){
   document.getElementById('addResBtn').addEventListener('click', openResModal);
 
   document.querySelectorAll('[data-toggle]').forEach(b=>{
-    b.addEventListener('click',()=>{
+    b.addEventListener('click',async ()=>{
       const k = b.dataset.toggle;
       const cur = all.find(x=>x._key===k).status;
-      resStatusOverrides[k] = cur==='confirmed' ? 'pending' : 'confirmed';
+      const newStatus = cur==='confirmed' ? 'pending' : 'confirmed';
+      
+      // Update in Supabase if this is a base reserva
+      if (k.startsWith('base_')) {
+        await toggleResStatusInSupabase(k, newStatus);
+      }
+      
+      // Update local state
+      resStatusOverrides[k] = newStatus;
       saveResStatus();
       renderRes();
     });
@@ -1784,9 +2215,18 @@ function renderGastos(){
 
   document.getElementById('addGastoBtn').addEventListener('click', openGastoModal);
   document.querySelectorAll('.gasto-del').forEach(b=>{
-    b.addEventListener('click',()=>{
+    b.addEventListener('click',async ()=>{
       if(confirm('¿Eliminar este gasto?')){
-        gastos.splice(parseInt(b.dataset.idx),1);
+        const gastoIdx = parseInt(b.dataset.idx);
+        const gastoToDelete = gastos[gastoIdx];
+        
+        // Delete from Supabase if it has an ID
+        if (gastoToDelete.id) {
+          await deleteGastoFromSupabase(gastoToDelete.id);
+        }
+        
+        // Remove from local state
+        gastos.splice(gastoIdx, 1);
         saveGastos(); renderGastos();
       }
     });
@@ -1819,7 +2259,7 @@ document.getElementById('gCancel').addEventListener('click',()=>document.getElem
 document.getElementById('gastoModal').addEventListener('click',e=>{
   if(e.target.id==='gastoModal') document.getElementById('gastoModal').classList.remove('is-open');
 });
-document.getElementById('gSave').addEventListener('click',()=>{
+document.getElementById('gSave').addEventListener('click',async ()=>{
   const desc = document.getElementById('gDesc').value.trim();
   const amt = parseFloat(document.getElementById('gAmt').value);
   const paidBy = document.getElementById('gPaid').value;
@@ -1829,8 +2269,16 @@ document.getElementById('gSave').addEventListener('click',()=>{
     alert('Completa todos los campos y selecciona al menos una persona en el split.');
     return;
   }
-  gastos.push({desc, amount:amt, paidBy, split, excludeBride, date:Date.now()});
-  saveGastos();
+  
+  const newGasto = {desc, amount:amt, paidBy, split, excludeBride, date:Date.now()};
+  
+  // Save to Supabase first
+  await saveGastoToSupabase(newGasto);
+  
+  // Also add to local state (for immediate feedback)
+  gastos.push(newGasto);
+  saveGastos(); // localStorage backup
+  
   document.getElementById('gastoModal').classList.remove('is-open');
   renderGastos();
 });
@@ -1840,7 +2288,7 @@ document.getElementById('rCancel').addEventListener('click',()=>document.getElem
 document.getElementById('resModal').addEventListener('click',e=>{
   if(e.target.id==='resModal') document.getElementById('resModal').classList.remove('is-open');
 });
-document.getElementById('rSave').addEventListener('click',()=>{
+document.getElementById('rSave').addEventListener('click',async ()=>{
   const icon = document.getElementById('rIcon').value.trim() || '📍';
   const title = document.getElementById('rTitle').value.trim();
   const meta = document.getElementById('rMeta').value.trim();
@@ -1849,8 +2297,16 @@ document.getElementById('rSave').addEventListener('click',()=>{
     alert('Llena al menos el nombre y los detalles.');
     return;
   }
-  resExtra.unshift({icon, title, meta, phone, status:'pending'});
+  
+  const newReserva = {icon, title, meta, phone, status:'pending'};
+  
+  // Save to Supabase
+  await addReservaToSupabase(newReserva);
+  
+  // Also add to local state for immediate feedback
+  resExtra.unshift(newReserva);
   saveResExtra();
+  
   document.getElementById('resModal').classList.remove('is-open');
   renderRes();
 });
@@ -1860,15 +2316,23 @@ document.getElementById('cCancel').addEventListener('click',()=>document.getElem
 document.getElementById('checkModal').addEventListener('click',e=>{
   if(e.target.id==='checkModal') document.getElementById('checkModal').classList.remove('is-open');
 });
-document.getElementById('cSave').addEventListener('click',()=>{
+document.getElementById('cSave').addEventListener('click',async ()=>{
   const cat = document.getElementById('cCat').value;
   const text = document.getElementById('cText').value.trim();
   if(!text){
     alert('Escribe el pendiente.');
     return;
   }
-  checkExtra.unshift({cat, text});
+  
+  const newPendiente = {cat, text};
+  
+  // Save to Supabase
+  await addPendienteToSupabase(newPendiente);
+  
+  // Also add to local state for immediate feedback
+  checkExtra.unshift(newPendiente);
   saveCheckExtra();
+  
   document.getElementById('checkModal').classList.remove('is-open');
   renderCheck();
 });
@@ -1977,10 +2441,23 @@ function renderCheck(){
   document.getElementById('addCheckBtn').addEventListener('click', openCheckModal);
 
   document.querySelectorAll('.check-card').forEach(c=>{
-    c.addEventListener('click',(e)=>{
+    c.addEventListener('click',async (e)=>{
       if(e.target.dataset.delcheck !== undefined) return;
       const k = c.dataset.key;
-      checkState[k] = !checkState[k];
+      
+      // Parse the key format (could be baseIdx for base items, or custom format for extra)
+      const isBaseItem = !isNaN(parseInt(k));
+      const currentlyDone = checkState[k];
+      const newState = !currentlyDone;
+      
+      if (isBaseItem) {
+        // This is a base checklist item - update in Supabase
+        const baseKey = `base_${k}`;
+        await togglePendienteInSupabase(baseKey, currentUser?.id, newState);
+      }
+      
+      // Update local state
+      checkState[k] = newState;
       saveCheck();
       renderCheck();
     });
@@ -2376,7 +2853,8 @@ function renderTriviaPool(){
       }
       if(isOn) delete triviaSelected[id];
       else triviaSelected[id] = true;
-      saveTriviaSelected();
+      await saveTriviaStateToSupabase();
+      saveTriviaSelected(); // localStorage backup
       renderTriviaPool();
     });
   });
@@ -2412,7 +2890,8 @@ function startTriviaGame(){
     timerId: null,
   };
   triviaScore = {a:0, b:0};
-  saveTriviaScore();
+  await saveTriviaStateToSupabase();
+  saveTriviaScore(); // localStorage backup
   document.getElementById('triviaGame').classList.add('is-open');
   renderTriviaGame();
 }
@@ -2520,7 +2999,8 @@ function renderTriviaGame(){
           s.phase = 'ready';
         }
         triviaScore = {a:s.scoreA, b:s.scoreB};
-        saveTriviaScore();
+        await saveTriviaStateToSupabase();
+        saveTriviaScore(); // localStorage backup
         renderTriviaGame();
       });
     });
@@ -2655,6 +3135,10 @@ function renderAll(){
 
 loadState();
 buildLoginGrid();
+
+// Initialize Supabase when app loads
+initSupabase();
+
 if(!tryAutoLogin()){
   // stay on login
 }
