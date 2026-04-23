@@ -2843,7 +2843,7 @@ function renderTriviaPool(){
   }).join('');
 
   pool.querySelectorAll('.tq').forEach(el=>{
-    el.addEventListener('click',()=>{
+    el.addEventListener('click', async ()=>{
       const id = el.dataset.qid;
       const isOn = !!triviaSelected[id];
       const cnt = Object.values(triviaSelected).filter(Boolean).length;
@@ -2870,7 +2870,7 @@ function getSelectedQuestions(){
   return TRIVIA_POOL.filter(q => ids.includes(q.id));
 }
 
-function startTriviaGame(){
+async function startTriviaGame(){
   const selected = getSelectedQuestions();
   if(selected.length === 0){
     alert('Selecciona al menos 1 pregunta del pool antes de jugar.');
@@ -2987,7 +2987,7 @@ function renderTriviaGame(){
       </div>
     `;
     document.querySelectorAll('[data-team]').forEach(btn=>{
-      btn.addEventListener('click',()=>{
+      btn.addEventListener('click', async ()=>{
         const t = btn.dataset.team;
         if(t==='a') s.scoreA++;
         else if(t==='b') s.scoreB++;
