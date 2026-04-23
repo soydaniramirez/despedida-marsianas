@@ -2157,42 +2157,33 @@ function renderOutfits(){
   `).join('');
 }
 
-// Event delegation handlers for reservas (more robust than individual listeners)
-async function handleResDropdownChange(e) {
-  if (!e.target.matches('.res-status-dropdown')) return;
-  
-  const dropdown = e.target;
-  const k = dropdown.dataset.toggle;
-  const newStatus = dropdown.value;
-  
-  console.log(`🔄 Changing status: ${k} → ${newStatus}`); // Debug log
+// Global inline event handlers for reservas (bulletproof approach)
+async function handleResStatusChange(key, newStatus) {
+  console.log(`🔄 Status change: ${key} → ${newStatus}`);
   
   try {
     // Update in Supabase if this is a base reserva
-    if (k.startsWith('base_')) {
-      console.log(`💾 Updating in Supabase: ${k} = ${newStatus}`); // Debug log
-      await toggleResStatusInSupabase(k, newStatus);
+    if (key.startsWith('base_')) {
+      console.log(`💾 Updating in Supabase: ${key} = ${newStatus}`);
+      await toggleResStatusInSupabase(key, newStatus);
     }
     
     // Update local state immediately for UI responsiveness  
-    resStatusOverrides[k] = newStatus;
+    resStatusOverrides[key] = newStatus;
     saveResStatus();
     
-    console.log(`✅ Status updated successfully`); // Debug log
+    console.log(`✅ Status updated successfully`);
     renderRes();
     
   } catch (error) {
     console.error('❌ Error updating reserva status:', error);
+    alert('Error actualizando reserva: ' + error.message);
   }
 }
 
-function handleResDeleteClick(e) {
-  if (!e.target.matches('.res-del')) return;
-  
-  const button = e.target;
-  const k = button.dataset.delres;
+function handleResDelete(key) {
   const all = getAllReservas();
-  const item = all.find(x => x._key === k);
+  const item = all.find(x => x._key === key);
   
   if (!confirm(`¿Eliminar "${item.title}"?`)) return;
   
@@ -2200,12 +2191,16 @@ function handleResDeleteClick(e) {
     resExtra.splice(item._customIdx, 1);
     saveResExtra();
   } else {
-    resDeleted[k] = true;
+    resDeleted[key] = true;
     saveResDeleted();
   }
   
   renderRes();
 }
+
+// Make functions globally available
+window.handleResStatusChange = handleResStatusChange;
+window.handleResDelete = handleResDelete;
 
 /* ========================================================================
    RENDER: RESERVAS
@@ -2247,11 +2242,11 @@ function renderRes(){
         ${r.phone?`<a href="tel:${r.phone.replace(/\s/g,'')}">📞 ${r.phone}</a>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-        <select class="res-status-dropdown" data-toggle="${r._key}">
+        <select class="res-status-dropdown" data-toggle="${r._key}" onchange="handleResStatusChange('${r._key}', this.value)">
           <option value="confirmed" ${r.status==='confirmed'?'selected':''}>✓ Confirmado</option>
           <option value="pending" ${r.status==='pending'?'selected':''}>⏳ Pendiente</option>
         </select>
-        <button class="res-del" data-delres="${r._key}" title="Eliminar reserva">×</button>
+        <button class="res-del" data-delres="${r._key}" onclick="handleResDelete('${r._key}')" title="Eliminar reserva">×</button>
       </div>
     </article>
   `).join('');
@@ -3443,25 +3438,6 @@ window.resetAllData = resetAllData;
 
 // Initialize Supabase when app loads
 initSupabase();
-
-// Initialize event delegation for robustness
-function initEventDelegation() {
-  // Wait for DOM to be ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initEventDelegation);
-    return;
-  }
-  
-  // Set up event delegation for reservas (once and for all)
-  const resContainer = document.getElementById('p-res');
-  if (resContainer) {
-    resContainer.addEventListener('change', handleResDropdownChange);
-    resContainer.addEventListener('click', handleResDeleteClick);
-    console.log('✅ Event delegation initialized for reservas');
-  }
-}
-
-initEventDelegation();
 
 if(!tryAutoLogin()){
   // stay on login
