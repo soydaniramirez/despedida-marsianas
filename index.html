@@ -2193,7 +2193,7 @@ function renderRes(){
       const newStatus = dropdown.value; // Get selected value directly
       
       // Update in Supabase if this is a base reserva
-      if (k.startsWith('base_reserva_')) {
+      if (k.startsWith('base_')) {
         await toggleResStatusInSupabase(k, newStatus);
       }
       
@@ -2584,7 +2584,7 @@ function renderCheck(){
       
       if (isBaseItem) {
         // This is a base checklist item - update in Supabase
-        const baseKey = `base_pendiente_${k}`;
+        const baseKey = `base_${k}`;
         if (currentUser?.id) {
           await togglePendienteInSupabase(baseKey, currentUser.id, newState);
           // Force refresh from Supabase to get latest state
