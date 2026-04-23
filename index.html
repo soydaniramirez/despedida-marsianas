@@ -369,6 +369,14 @@
     cursor:pointer;border:none;transition:transform .12s;
   }
   .res-status:active{transform:scale(.94)}
+  .res-status-dropdown{
+    font-size:11px;font-weight:600;padding:6px 10px;border-radius:8px;
+    border:1.5px solid var(--line);background:var(--surface);
+    color:var(--ink);cursor:pointer;min-width:110px;
+  }
+  .res-status-dropdown:focus{
+    outline:none;border-color:var(--magenta);
+  }
   .res-del{
     width:26px;height:26px;border-radius:8px;
     background:transparent;border:1.5px solid var(--line);
@@ -2154,7 +2162,10 @@ function renderRes(){
         ${r.phone?`<a href="tel:${r.phone.replace(/\s/g,'')}">📞 ${r.phone}</a>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-        <button class="res-status ${r.status}" data-toggle="${r._key}">${r.status==='confirmed'?'✓ ok':'pendiente'}</button>
+        <select class="res-status-dropdown" data-toggle="${r._key}" value="${r.status}">
+          <option value="confirmed" ${r.status==='confirmed'?'selected':''}>✓ Confirmado</option>
+          <option value="pending" ${r.status==='pending'?'selected':''}>⏳ Pendiente</option>
+        </select>
         <button class="res-del" data-delres="${r._key}" title="Eliminar reserva">×</button>
       </div>
     </article>
@@ -2162,11 +2173,10 @@ function renderRes(){
 
   document.getElementById('addResBtn').addEventListener('click', openResModal);
 
-  document.querySelectorAll('[data-toggle]').forEach(b=>{
-    b.addEventListener('click',async ()=>{
-      const k = b.dataset.toggle;
-      const cur = all.find(x=>x._key===k).status;
-      const newStatus = cur==='confirmed' ? 'pending' : 'confirmed';
+  document.querySelectorAll('[data-toggle]').forEach(dropdown=>{
+    dropdown.addEventListener('change',async ()=>{
+      const k = dropdown.dataset.toggle;
+      const newStatus = dropdown.value; // Get selected value directly
       
       // Update in Supabase if this is a base reserva
       if (k.startsWith('base_')) {
@@ -2549,10 +2559,23 @@ function renderCheck(){
       const currentlyDone = checkState[k];
       const newState = !currentlyDone;
       
+      // Ensure we have a valid current user
+      if (!currentUser) {
+        // Try to restore user from localStorage
+        const userId = localStorage.getItem('marsianas:user');
+        if (userId) {
+          currentUser = CHICAS.find(x => x.id === userId);
+        }
+      }
+      
       if (isBaseItem) {
         // This is a base checklist item - update in Supabase
         const baseKey = `base_${k}`;
-        await togglePendienteInSupabase(baseKey, currentUser?.id, newState);
+        if (currentUser?.id) {
+          await togglePendienteInSupabase(baseKey, currentUser.id, newState);
+        } else {
+          console.warn('⚠️ No current user for checklist sync');
+        }
       }
       
       // Update local state
