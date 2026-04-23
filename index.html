@@ -1662,16 +1662,22 @@ async function refreshChecklistFromSupabase() {
     if (error) throw error;
     
     // Reset our local state
-    checkState = {};
     checkExtra = [];
     
     data.forEach(p => {
       if (p.base_key) {
-        // This is a base checklist item
-        const baseIdx = parseInt(p.base_key.replace('base_', ''));
-        checkState[baseIdx] = p.done_by || [];
+        // Base checklist items will be handled by getAllCheck() function
+        // Store them in checkExtra with their Supabase data for reference
+        checkExtra.push({
+          id: p.id,
+          baseKey: p.base_key,
+          cat: p.cat,
+          text: p.texto,
+          doneBy: p.done_by || [],
+          hideForBride: p.hide_for_bride
+        });
       } else {
-        // This is a custom checklist item
+        // Custom checklist items
         checkExtra.push({
           id: p.id,
           cat: p.cat,
@@ -2528,11 +2534,35 @@ document.getElementById('itinDelBtn').addEventListener('click',async ()=>{
 ======================================================================== */
 function getAllCheck(){
   const base = CHECKLIST_DEFAULT
-    .map((it,i)=>({...it, _key:'base_'+i, _custom:false}))
-    .filter(it => !currentUser.bride || !it.hideForBride)
+    .map((it,i)=>{
+      // Find corresponding Supabase item by baseKey
+      const supabaseItem = checkExtra.find(ex => ex.baseKey === `base_${i}`);
+      const doneBy = supabaseItem?.doneBy || [];
+      const isDoneByCurrentUser = currentUser ? doneBy.includes(currentUser.id) : false;
+      
+      return {
+        ...it, 
+        _key: `base_${i}`, 
+        _custom: false,
+        _isDone: isDoneByCurrentUser,
+        _doneBy: doneBy
+      };
+    })
+    .filter(it => !currentUser?.bride || !it.hideForBride)
     .filter(it => !checkDeleted[it._key]);
-  const custom = checkExtra.map((it,i)=>({...it, _key:'ext_'+i, _custom:true, _customIdx:i}));
-  return [...custom, ...base];
+    
+  const custom = checkExtra
+    .filter(ex => !ex.baseKey) // Only custom items (no baseKey)
+    .map((it,i)=>({
+      ...it, 
+      _key:'ext_'+i, 
+      _custom:true, 
+      _customIdx:i,
+      _isDone: checkState[`ext_${i}`] || false,
+      _doneBy: []
+    }));
+    
+  return [...base, ...custom];
 }
 
 function renderCheck(){
@@ -2543,7 +2573,10 @@ function renderCheck(){
     byCat[item.cat] = byCat[item.cat] || [];
     byCat[item.cat].push(item);
   });
-  const totalDone = all.filter(it=>checkState[it._key]).length;
+  
+  // Count done items properly
+  const totalDone = all.filter(it=> it._isDone).length;
+  
   root.innerHTML = `
     <h2 class="section-title">Pendientes <small>antes de despegar</small></h2>
     <p class="section-desc">${totalDone} de ${all.length} listos. Cada quien marca lo suyo.</p>
@@ -2552,13 +2585,22 @@ function renderCheck(){
 
   ` + Object.keys(byCat).map(cat=>`
     <h3 style="font-family:var(--display);font-style:italic;font-weight:700;font-size:18px;margin:18px 0 8px;color:var(--magenta)">${cat}</h3>
-    ${byCat[cat].map(item=>`
-      <div class="check-card ${checkState[item._key]?'done':''}" data-key="${item._key}">
-        <div class="check-box">${checkState[item._key]?'✓':''}</div>
-        <div class="check-text">${item.text}${item._custom?' <span style="font-size:9px;background:var(--yellow);color:var(--ink);padding:1px 5px;border-radius:5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-left:4px">nuevo</span>':''}</div>
-        <button data-delcheck="${item._key}" class="res-del" title="Eliminar">×</button>
-      </div>
-    `).join('')}
+    ${byCat[cat].map(item=>{
+      // Generate who completed this item
+      const doneByNames = item._doneBy.map(id => {
+        const user = CHICAS.find(c => c.id === id);
+        return user ? user.name : id;
+      });
+      const doneByText = doneByNames.length > 0 ? ` <small style="color:var(--magenta);font-size:10px;">✓ ${doneByNames.join(', ')}</small>` : '';
+      
+      return `
+        <div class="check-card ${item._isDone?'done':''}" data-key="${item._key}">
+          <div class="check-box">${item._isDone?'✓':''}</div>
+          <div class="check-text">${item.text}${item._custom?' <span style="font-size:9px;background:var(--yellow);color:var(--ink);padding:1px 5px;border-radius:5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-left:4px">nuevo</span>':''}${doneByText}</div>
+          <button data-delcheck="${item._key}" class="res-del" title="Eliminar">×</button>
+        </div>
+      `;
+    }).join('')}
   `).join('');
 
   document.getElementById('addCheckBtn').addEventListener('click', openCheckModal);
@@ -2568,10 +2610,8 @@ function renderCheck(){
       if(e.target.dataset.delcheck !== undefined) return;
       const k = c.dataset.key;
       
-      // Parse the key format (could be baseIdx for base items, or custom format for extra)
-      const isBaseItem = !isNaN(parseInt(k));
-      const currentlyDone = checkState[k];
-      const newState = !currentlyDone;
+      // Determine if this is a base item or custom item
+      const isBaseItem = k.startsWith('base_');
       
       // Ensure we have a valid current user
       if (!currentUser) {
@@ -2583,24 +2623,25 @@ function renderCheck(){
       }
       
       if (isBaseItem) {
-        // This is a base checklist item - update in Supabase
-        const baseKey = `base_${k}`;
+        // Base item - update in Supabase with current user
         if (currentUser?.id) {
-          await togglePendienteInSupabase(baseKey, currentUser.id, newState);
+          const all = getAllCheck();
+          const item = all.find(it => it._key === k);
+          const newState = !item._isDone;
+          
+          await togglePendienteInSupabase(k, currentUser.id, newState);
           // Force refresh from Supabase to get latest state
           await refreshChecklistFromSupabase();
         } else {
           console.warn('⚠️ No current user for checklist sync');
         }
-      }
-      
-      // Update local state
-      checkState[k] = newState;
-      saveCheck();
-      
-      // For base items, let Supabase refresh handle the UI update
-      // For custom items, refresh immediately
-      if (!isBaseItem) {
+      } else {
+        // Custom item - update localStorage only
+        const currentState = checkState[k] || false;
+        const newState = !currentState;
+        
+        checkState[k] = newState;
+        saveCheck();
         renderCheck();
       }
     });
