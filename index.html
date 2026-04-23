@@ -1324,11 +1324,25 @@ let db;
 let isSupabaseConnected = false;
 
 // Initialize Supabase client
+function setupAutoReconnect() {
+  setInterval(() => {
+    if (!isSupabaseConnected && db) {
+      console.log('🔄 Attempting Supabase reconnection...');
+      subscribeToRealtimeUpdates();
+      isSupabaseConnected = true;
+      showConnectionStatus(true);
+    }
+  }, 30000); // Every 30 seconds
+}
+
 function initSupabase() {
   try {
     db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     isSupabaseConnected = true;
     console.log('✅ Supabase connected');
+    
+    // Setup auto-reconnection for stability
+    setupAutoReconnect();
     
     // Subscribe to realtime changes
     subscribeToRealtimeUpdates();
@@ -2179,7 +2193,7 @@ function renderRes(){
       const newStatus = dropdown.value; // Get selected value directly
       
       // Update in Supabase if this is a base reserva
-      if (k.startsWith('base_')) {
+      if (k.startsWith('base_reserva_')) {
         await toggleResStatusInSupabase(k, newStatus);
       }
       
@@ -2570,9 +2584,11 @@ function renderCheck(){
       
       if (isBaseItem) {
         // This is a base checklist item - update in Supabase
-        const baseKey = `base_${k}`;
+        const baseKey = `base_pendiente_${k}`;
         if (currentUser?.id) {
           await togglePendienteInSupabase(baseKey, currentUser.id, newState);
+          // Force refresh from Supabase to get latest state
+          await refreshChecklistFromSupabase();
         } else {
           console.warn('⚠️ No current user for checklist sync');
         }
@@ -2581,7 +2597,12 @@ function renderCheck(){
       // Update local state
       checkState[k] = newState;
       saveCheck();
-      renderCheck();
+      
+      // For base items, let Supabase refresh handle the UI update
+      // For custom items, refresh immediately
+      if (!isBaseItem) {
+        renderCheck();
+      }
     });
   });
 
