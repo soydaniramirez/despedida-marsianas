@@ -1695,6 +1695,21 @@ async function refreshChecklistFromSupabase() {
   }
 }
 
+async function deleteCheckFromSupabase(checkId) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('pendientes').delete().eq('id', checkId);
+    if (error) throw error;
+    console.log('🗑️ Custom check deleted from Supabase');
+    
+    // Refresh to get updated list
+    await refreshChecklistFromSupabase();
+  } catch (error) {
+    console.error('❌ Error deleting custom check:', error);
+  }
+}
+
 // TRIVIA functions
 async function saveTriviaStateToSupabase() {
   if (!db) return;
@@ -2182,7 +2197,7 @@ function renderRes(){
         ${r.phone?`<a href="tel:${r.phone.replace(/\s/g,'')}">📞 ${r.phone}</a>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-        <select class="res-status-dropdown" data-toggle="${r._key}" value="${r.status}">
+        <select class="res-status-dropdown" data-toggle="${r._key}">
           <option value="confirmed" ${r.status==='confirmed'?'selected':''}>✓ Confirmado</option>
           <option value="pending" ${r.status==='pending'?'selected':''}>⏳ Pendiente</option>
         </select>
@@ -2651,15 +2666,27 @@ function renderCheck(){
     b.addEventListener('click',(e)=>{
       e.stopPropagation();
       const k = b.dataset.delcheck;
+      const all = getAllCheck();
       const item = all.find(x=>x._key===k);
       if(!confirm(`¿Eliminar "${item.text}"?`)) return;
+      
       if(item._custom){
-        checkExtra.splice(item._customIdx, 1);
-        saveCheckExtra();
+        // Custom item - remove from checkExtra and Supabase if it has an id
+        if (item.id) {
+          // This is a custom item stored in Supabase
+          deleteCheckFromSupabase(item.id);
+        } else {
+          // This is a local-only custom item
+          const customIndex = item._customIdx;
+          checkExtra.splice(customIndex, 1);
+          saveCheckExtra();
+        }
       } else {
+        // Base item - mark as deleted
         checkDeleted[k] = true;
         saveCheckDeleted();
       }
+      
       delete checkState[k];
       saveCheck();
       renderCheck();
@@ -3319,6 +3346,80 @@ function renderAll(){
 
 loadState();
 buildLoginGrid();
+
+// ================= RESET DATA FUNCTION =================
+// Call this from browser console: resetAllData()
+async function resetAllData() {
+  if (!confirm('⚠️ PELIGRO: Esto va a ELIMINAR TODOS los datos de gastos, pendientes custom, reservas custom, etc. ¿Estás segura?')) return;
+  if (!confirm('🚨 ÚLTIMA CONFIRMACIÓN: ¿Realmente quieres reiniciar TODO? Esto NO se puede deshacer.')) return;
+  
+  try {
+    console.log('🔄 Starting data reset...');
+    
+    // Clear Supabase tables
+    if (db) {
+      await db.from('gastos').delete().neq('id', 0); // Delete all
+      await db.from('pendientes').delete().not('base_key', 'is', null); // Delete only custom items
+      await db.from('reservas').delete().not('base_key', 'is', null); // Delete only custom items  
+      await db.from('itinerario_eventos').delete().neq('id', 0); // Delete all custom events
+      await db.from('trivia_config').delete().neq('id', 0); // Delete trivia state
+      console.log('✅ Supabase data cleared');
+    }
+    
+    // Clear localStorage
+    const keysToDelete = [
+      'marsianas:gastos',
+      'marsianas:check',
+      'marsianas:res_status',
+      'marsianas:res_extra', 
+      'marsianas:res_deleted',
+      'marsianas:check_extra',
+      'marsianas:check_deleted',
+      'marsianas:itin_edits',
+      'marsianas:itin_deleted', 
+      'marsianas:itin_extra',
+      'marsianas:trivia_selected',
+      'marsianas:trivia_score'
+    ];
+    
+    keysToDelete.forEach(key => localStorage.removeItem(key));
+    console.log('✅ localStorage cleared');
+    
+    // Reset variables
+    gastos = [];
+    checkState = {};
+    resStatusOverrides = {};
+    resExtra = [];
+    resDeleted = {};
+    checkExtra = [];
+    checkDeleted = {};
+    itinEdits = {};
+    itinDeleted = {};
+    itinExtra = {};
+    triviaSelected = {};
+    triviaScore = {a:0, b:0};
+    
+    // Re-seed base data
+    await seedDataIfNeeded();
+    
+    // Refresh all sections
+    renderGastos();
+    renderRes(); 
+    renderCheck();
+    renderItin();
+    renderTrivia();
+    
+    console.log('🎉 Data reset complete! App is now clean for the trip.');
+    alert('✅ Datos reiniciados correctamente. La app está lista para las Marsianas.');
+    
+  } catch (error) {
+    console.error('❌ Error during reset:', error);
+    alert('❌ Error durante el reset: ' + error.message);
+  }
+}
+
+// Make it available globally for console access
+window.resetAllData = resetAllData;
 
 // Initialize Supabase when app loads
 initSupabase();
