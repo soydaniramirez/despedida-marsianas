@@ -1737,6 +1737,85 @@ async function refreshTriviaFromSupabase() {
   }
 }
 
+// ITINERARIO functions
+async function addItinerarioEventToSupabase(dayNum, event) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('itinerario_eventos').insert({
+      day_num: dayNum,
+      hora: event.time,
+      titulo: event.title,
+      lugar: event.loc || null,
+      tag: event.tag || null
+    });
+    if (error) throw error;
+    console.log('📅 Itinerario event added to Supabase');
+  } catch (error) {
+    console.error('❌ Error adding itinerario event:', error);
+  }
+}
+
+async function updateItinerarioEventInSupabase(eventId, event) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('itinerario_eventos').update({
+      hora: event.time,
+      titulo: event.title,
+      lugar: event.loc || null,
+      tag: event.tag || null
+    }).eq('id', eventId);
+    if (error) throw error;
+    console.log('📅 Itinerario event updated in Supabase');
+  } catch (error) {
+    console.error('❌ Error updating itinerario event:', error);
+  }
+}
+
+async function deleteItinerarioEventFromSupabase(eventId) {
+  if (!db) return;
+  
+  try {
+    const { error } = await db.from('itinerario_eventos').update({ deleted: true }).eq('id', eventId);
+    if (error) throw error;
+    console.log('📅 Itinerario event deleted in Supabase');
+  } catch (error) {
+    console.error('❌ Error deleting itinerario event:', error);
+  }
+}
+
+async function refreshItinerarioFromSupabase() {
+  if (!db) return;
+  
+  try {
+    const { data, error } = await db.from('itinerario_eventos').select('*').eq('deleted', false).order('day_num', { ascending: true });
+    if (error) throw error;
+    
+    // Reset local state
+    itinExtra = {};
+    itinEdits = {};
+    
+    data.forEach(event => {
+      const dayKey = String(event.day_num);
+      if (!itinExtra[dayKey]) itinExtra[dayKey] = [];
+      
+      itinExtra[dayKey].push({
+        id: event.id,
+        time: event.hora,
+        title: event.titulo,
+        loc: event.lugar,
+        tag: event.tag
+      });
+    });
+    
+    renderItin();
+    console.log('🔄 Itinerario refreshed from Supabase');
+  } catch (error) {
+    console.error('❌ Error refreshing itinerario:', error);
+  }
+}
+
 // Fallback localStorage functions (kept for offline support)
 function saveGastos(){ try{ localStorage.setItem(KEY_GASTOS, JSON.stringify(gastos)); }catch(e){} }
 function saveCheck(){ try{ localStorage.setItem(KEY_CHECK, JSON.stringify(checkState)); }catch(e){} }
@@ -1837,6 +1916,7 @@ function enterApp(){
     refreshReservasFromSupabase();
     refreshChecklistFromSupabase();
     refreshTriviaFromSupabase();
+    refreshItinerarioFromSupabase();
   }
 }
 
@@ -2093,7 +2173,7 @@ function renderRes(){
         await toggleResStatusInSupabase(k, newStatus);
       }
       
-      // Update local state
+      // Update local state immediately for UI responsiveness
       resStatusOverrides[k] = newStatus;
       saveResStatus();
       renderRes();
@@ -2342,7 +2422,7 @@ document.getElementById('itinCancelBtn').addEventListener('click',()=>document.g
 document.getElementById('itinModal').addEventListener('click',e=>{
   if(e.target.id==='itinModal') document.getElementById('itinModal').classList.remove('is-open');
 });
-document.getElementById('itinSaveBtn').addEventListener('click',()=>{
+document.getElementById('itinSaveBtn').addEventListener('click',async ()=>{
   const m = document.getElementById('itinModal');
   const evKey = m.dataset.evkey;
   const dayNum = parseInt(m.dataset.daynum);
@@ -2360,25 +2440,36 @@ document.getElementById('itinSaveBtn').addEventListener('click',()=>{
     return;
   }
 
+  const eventData = {time, title, loc, tag};
+
   if(isNew){
-    // Add custom event
+    // Add custom event to Supabase
+    await addItinerarioEventToSupabase(dayNum, eventData);
+    
+    // Also add to local state for immediate feedback
     const key = String(dayNum);
     if(!itinExtra[key]) itinExtra[key] = [];
-    itinExtra[key].push({time, title, loc, tag});
+    itinExtra[key].push(eventData);
     saveItinExtra();
   } else if(isCustom){
     // Edit existing custom event
-    itinExtra[String(dayNum)][customIdx] = {time, title, loc, tag};
+    const existingEvent = itinExtra[String(dayNum)][customIdx];
+    if(existingEvent.id) {
+      await updateItinerarioEventInSupabase(existingEvent.id, eventData);
+    }
+    
+    // Update local state
+    itinExtra[String(dayNum)][customIdx] = eventData;
     saveItinExtra();
   } else {
-    // Edit base event (override)
-    itinEdits[evKey] = {time, title, loc, tag};
+    // Edit base event (override) - this stays localStorage only for now
+    itinEdits[evKey] = eventData;
     saveItinEdits();
   }
   m.classList.remove('is-open');
   renderItin();
 });
-document.getElementById('itinDelBtn').addEventListener('click',()=>{
+document.getElementById('itinDelBtn').addEventListener('click',async ()=>{
   const m = document.getElementById('itinModal');
   const evKey = m.dataset.evkey;
   const dayNum = parseInt(m.dataset.daynum);
@@ -2388,9 +2479,17 @@ document.getElementById('itinDelBtn').addEventListener('click',()=>{
   if(!confirm('¿Eliminar este evento del itinerario?')) return;
 
   if(isCustom){
+    // Delete from Supabase if it has an ID
+    const eventToDelete = itinExtra[String(dayNum)][customIdx];
+    if(eventToDelete.id) {
+      await deleteItinerarioEventFromSupabase(eventToDelete.id);
+    }
+    
+    // Remove from local state
     itinExtra[String(dayNum)].splice(customIdx, 1);
     saveItinExtra();
   } else {
+    // Base event deletion (stays localStorage only)
     itinDeleted[evKey] = true;
     saveItinDeleted();
     delete itinEdits[evKey];
