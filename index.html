@@ -2157,6 +2157,56 @@ function renderOutfits(){
   `).join('');
 }
 
+// Event delegation handlers for reservas (more robust than individual listeners)
+async function handleResDropdownChange(e) {
+  if (!e.target.matches('.res-status-dropdown')) return;
+  
+  const dropdown = e.target;
+  const k = dropdown.dataset.toggle;
+  const newStatus = dropdown.value;
+  
+  console.log(`🔄 Changing status: ${k} → ${newStatus}`); // Debug log
+  
+  try {
+    // Update in Supabase if this is a base reserva
+    if (k.startsWith('base_')) {
+      console.log(`💾 Updating in Supabase: ${k} = ${newStatus}`); // Debug log
+      await toggleResStatusInSupabase(k, newStatus);
+    }
+    
+    // Update local state immediately for UI responsiveness  
+    resStatusOverrides[k] = newStatus;
+    saveResStatus();
+    
+    console.log(`✅ Status updated successfully`); // Debug log
+    renderRes();
+    
+  } catch (error) {
+    console.error('❌ Error updating reserva status:', error);
+  }
+}
+
+function handleResDeleteClick(e) {
+  if (!e.target.matches('.res-del')) return;
+  
+  const button = e.target;
+  const k = button.dataset.delres;
+  const all = getAllReservas();
+  const item = all.find(x => x._key === k);
+  
+  if (!confirm(`¿Eliminar "${item.title}"?`)) return;
+  
+  if (item._custom) {
+    resExtra.splice(item._customIdx, 1);
+    saveResExtra();
+  } else {
+    resDeleted[k] = true;
+    saveResDeleted();
+  }
+  
+  renderRes();
+}
+
 /* ========================================================================
    RENDER: RESERVAS
 ======================================================================== */
@@ -2207,39 +2257,9 @@ function renderRes(){
   `).join('');
 
   document.getElementById('addResBtn').addEventListener('click', openResModal);
-
-  document.querySelectorAll('[data-toggle]').forEach(dropdown=>{
-    dropdown.addEventListener('change',async ()=>{
-      const k = dropdown.dataset.toggle;
-      const newStatus = dropdown.value; // Get selected value directly
-      
-      // Update in Supabase if this is a base reserva
-      if (k.startsWith('base_')) {
-        await toggleResStatusInSupabase(k, newStatus);
-      }
-      
-      // Update local state immediately for UI responsiveness
-      resStatusOverrides[k] = newStatus;
-      saveResStatus();
-      renderRes();
-    });
-  });
-
-  document.querySelectorAll('[data-delres]').forEach(b=>{
-    b.addEventListener('click',()=>{
-      const k = b.dataset.delres;
-      const item = all.find(x=>x._key===k);
-      if(!confirm(`¿Eliminar "${item.title}"?`)) return;
-      if(item._custom){
-        resExtra.splice(item._customIdx, 1);
-        saveResExtra();
-      } else {
-        resDeleted[k] = true;
-        saveResDeleted();
-      }
-      renderRes();
-    });
-  });
+  
+  // Event delegation handles dropdown changes and delete buttons automatically
+  // No need to add individual listeners here anymore
 }
 
 function openResModal(){
@@ -3423,6 +3443,25 @@ window.resetAllData = resetAllData;
 
 // Initialize Supabase when app loads
 initSupabase();
+
+// Initialize event delegation for robustness
+function initEventDelegation() {
+  // Wait for DOM to be ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initEventDelegation);
+    return;
+  }
+  
+  // Set up event delegation for reservas (once and for all)
+  const resContainer = document.getElementById('p-res');
+  if (resContainer) {
+    resContainer.addEventListener('change', handleResDropdownChange);
+    resContainer.addEventListener('click', handleResDeleteClick);
+    console.log('✅ Event delegation initialized for reservas');
+  }
+}
+
+initEventDelegation();
 
 if(!tryAutoLogin()){
   // stay on login
