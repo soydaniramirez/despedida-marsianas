@@ -1542,14 +1542,50 @@ async function refreshGastosFromSupabase() {
 
 // RESERVAS functions
 async function toggleResStatusInSupabase(baseKey, newStatus) {
-  if (!db) return;
+  if (!db) {
+    console.log('❌ No DB connection for reservas update');
+    return;
+  }
   
   try {
-    const { error } = await db.from('reservas').update({ status: newStatus }).eq('base_key', baseKey);
-    if (error) throw error;
-    console.log('🔄 Reserva status updated in Supabase');
+    console.log(`🔍 Looking for reserva with base_key: "${baseKey}"`);
+    
+    // First, check if the record exists
+    const { data: existingData, error: selectError } = await db
+      .from('reservas')
+      .select('*')
+      .eq('base_key', baseKey)
+      .single();
+    
+    if (selectError) {
+      console.error('❌ Error finding reserva:', selectError);
+      console.log('🔍 Available reservas in DB:');
+      
+      // Show all available reservas for debugging
+      const { data: allReservas } = await db.from('reservas').select('base_key, title, status');
+      console.table(allReservas);
+      return;
+    }
+    
+    console.log('✅ Found reserva:', existingData);
+    console.log(`🔄 Updating status from "${existingData.status}" to "${newStatus}"`);
+    
+    // Now update the record
+    const { error: updateError } = await db
+      .from('reservas')
+      .update({ status: newStatus })
+      .eq('base_key', baseKey);
+    
+    if (updateError) {
+      console.error('❌ Error updating reserva:', updateError);
+      throw updateError;
+    }
+    
+    console.log('✅ Reserva status updated in Supabase successfully');
+    
   } catch (error) {
-    console.error('❌ Error updating reserva status:', error);
+    console.error('❌ Error in toggleResStatusInSupabase:', error);
+    alert('Error updating reserva: ' + error.message);
   }
 }
 
@@ -1585,10 +1621,7 @@ async function refreshReservasFromSupabase() {
     data.forEach(r => {
       if (r.base_key) {
         // This is a base reserva, update status if changed
-        const baseIdx = parseInt(r.base_key.replace('base_', ''));
-        if (RESERVAS[baseIdx]) {
-          resStatusOverrides[baseIdx] = r.status;
-        }
+        resStatusOverrides[r.base_key] = r.status;
       } else {
         // This is a custom reserva
         resExtra.push({
@@ -2220,12 +2253,15 @@ function renderRes(){
       if (k.startsWith('base_')) {
         console.log(`💾 Updating in Supabase: ${k} = ${newStatus}`);
         await toggleResStatusInSupabase(k, newStatus);
+        
+        // Force refresh from Supabase to get latest state
+        await refreshReservasFromSupabase();
+      } else {
+        // Update local state immediately for UI responsiveness
+        resStatusOverrides[k] = newStatus;
+        saveResStatus();
+        renderRes();
       }
-      
-      // Update local state immediately for UI responsiveness
-      resStatusOverrides[k] = newStatus;
-      saveResStatus();
-      renderRes();
       
       console.log(`✅ Status updated successfully`);
     });
