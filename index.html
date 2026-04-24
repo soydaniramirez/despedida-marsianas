@@ -390,6 +390,80 @@
   .res-status.pending{background:rgba(255,146,48,.15);color:#c45a00}
   .res-card a{color:var(--magenta);font-weight:600;text-decoration:none;font-size:12px;display:inline-block;margin-top:4px}
 
+  /* === LIQUIDACIONES === */
+  .liquidaciones-container{max-width:420px;margin:0 auto;padding:20px;font-family:var(--body)}
+  .liquidaciones-empty{text-align:center;padding:40px 20px;color:var(--text-2);opacity:.7}
+  .liquidaciones-empty .em{font-size:48px;display:block;margin-bottom:12px}
+  
+  .transfer-card{
+    background:#fff;border-radius:18px;padding:18px;margin-bottom:12px;
+    border:1px solid var(--line);box-shadow:0 2px 8px rgba(0,0,0,.06);
+  }
+  .transfer-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .transfer-users{display:flex;align-items:center;gap:8px;font-weight:600}
+  .transfer-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+  .transfer-arrow{font-size:20px;color:var(--text-2);margin:0 4px}
+  .transfer-amount{font-family:var(--display);font-weight:800;font-size:24px;color:var(--magenta)}
+  .transfer-actions{display:flex;gap:8px;margin-top:12px}
+  .transfer-btn{
+    flex:1;padding:10px 16px;border-radius:12px;font-weight:600;font-size:14px;
+    border:none;cursor:pointer;transition:all .2s ease;
+  }
+  .transfer-btn.primary{background:var(--magenta);color:#fff}
+  .transfer-btn.primary:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(255,61,138,.3)}
+  .transfer-btn.secondary{background:var(--cream);color:var(--text);border:1px solid var(--line)}
+  .transfer-btn.secondary:hover{background:#f8f9fa}
+  .transfer-btn.paid{background:#0BCE91;color:#fff;cursor:default}
+  
+  .liquidaciones-summary{
+    background:var(--ink);color:var(--cream);border-radius:18px;padding:20px;margin-bottom:24px;
+    text-align:center;
+  }
+  .liquidaciones-summary .em{font-size:32px;margin-bottom:8px;display:block}
+  .liquidaciones-total{font-family:var(--display);font-size:28px;font-weight:800;margin-bottom:6px}
+  .liquidaciones-subtitle{font-size:13px;opacity:.8}
+
+  /* === NOTIFICATIONS === */
+  .notification-toast{
+    position:fixed;top:20px;right:20px;
+    background:#fff;border-radius:12px;padding:16px 20px;
+    box-shadow:0 8px 24px rgba(0,0,0,.15);
+    z-index:10000;max-width:320px;
+    border-left:4px solid var(--magenta);
+    animation:slideInRight .3s ease;
+    font-family:var(--body);
+  }
+  .notification-toast.success{border-left-color:#0BCE91}
+  .notification-toast.warning{border-left-color:#FF9230}
+  .notification-toast.error{border-left-color:#FF6B5B}
+  
+  .notification-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .notification-icon{font-size:16px}
+  .notification-title{font-weight:600;font-size:14px;color:var(--ink)}
+  .notification-close{
+    margin-left:auto;background:none;border:none;font-size:18px;
+    color:var(--text-2);cursor:pointer;padding:0;
+  }
+  .notification-message{font-size:13px;color:var(--text);line-height:1.4}
+  
+  @keyframes slideInRight{
+    from{transform:translateX(100%);opacity:0}
+    to{transform:translateX(0);opacity:1}
+  }
+  
+  .notification-badge{
+    position:absolute;top:-6px;right:-6px;
+    background:#FF6B5B;color:#fff;font-size:10px;font-weight:600;
+    border-radius:50%;min-width:18px;height:18px;
+    display:flex;align-items:center;justify-content:center;
+    animation:pulse .8s infinite;
+  }
+  
+  @keyframes pulse{
+    0%,100%{transform:scale(1)}
+    50%{transform:scale(1.1)}
+  }
+
   /* === GASTOS === */
   .balance-hero{
     background:var(--ink);color:var(--cream);
@@ -941,6 +1015,7 @@
       <button class="tab" data-tab="outfits"><span class="em">👗</span>Outfits</button>
       <button class="tab" data-tab="res"><span class="em">📍</span>Reservas</button>
       <button class="tab" data-tab="gastos"><span class="em">💸</span>Gastos</button>
+      <button class="tab" data-tab="liquidaciones"><span class="em">💰</span>Liquidaciones</button>
       <button class="tab" data-tab="sorteos"><span class="em">🎲</span>Sorteos</button>
       <button class="tab" data-tab="mars"><span class="em">💍</span>Para Mars</button>
       <button class="tab" data-tab="check"><span class="em">✅</span>Pendientes</button>
@@ -953,6 +1028,7 @@
   <section class="panel" id="p-outfits"></section>
   <section class="panel" id="p-res"></section>
   <section class="panel" id="p-gastos"></section>
+  <section class="panel" id="p-liquidaciones"></section>
   <section class="panel" id="p-sorteos"></section>
   <section class="panel" id="p-mars"></section>
   <section class="panel" id="p-check"></section>
@@ -1602,20 +1678,37 @@ async function refreshGastosFromSupabase() {
     const { data, error } = await db.from('gastos').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     
+    // Store current gastos count before refresh
+    const previousCount = gastos.length;
+    const previousGastos = [...gastos];
+    
     // Convert Supabase data to our format
-    gastos = data.map(g => ({
+    const newGastos = data.map(g => ({
       id: g.id,
-      desc: g.desc,
-      category: g.category || 'other',
-      amount: g.amount,
-      paymentMethod: g.payment_method || 'cash',
-      paidBy: g.paid_by,
-      split: g.split,
-      excludeBride: g.exclude_bride,
-      date: new Date(g.created_at).getTime()
+      desc: g.descripcion,
+      category: g.categoria || 'other',
+      amount: g.monto,
+      paymentMethod: g.metodo_pago || 'cash',
+      paidBy: g.quien_pago,
+      split: g.entre_quienes,
+      excludeBride: g.excluir_novia,
+      date: new Date(g.fecha).getTime()
     }));
     
+    // Check for new gastos (real-time notifications)
+    if (previousCount > 0 && newGastos.length > previousCount) {
+      const newGasto = newGastos[0]; // Most recent gasto
+      const isMyGasto = newGasto.paidBy === currentUser.id;
+      
+      if (!isMyGasto) {
+        // Only notify if it's not the current user's gasto
+        notifyNewGasto(newGasto);
+      }
+    }
+    
+    gastos = newGastos;
     renderGastos();
+    renderLiquidaciones(); // Update settlements when gastos change
     console.log('🔄 Gastos refreshed from Supabase');
   } catch (error) {
     console.error('❌ Error refreshing gastos:', error);
@@ -2117,6 +2210,9 @@ document.querySelectorAll('.tab').forEach(t=>{
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('is-active'));
     document.getElementById('p-'+t.dataset.tab).classList.add('is-active');
     window.scrollTo({top:document.querySelector('.tabs').offsetTop - 10, behavior:'smooth'});
+    
+    // Clear notification badges when visiting sections
+    clearSectionBadge(t.dataset.tab);
   });
 });
 
@@ -2577,6 +2673,361 @@ document.getElementById('gSave').addEventListener('click',async ()=>{
   document.getElementById('gastoModal').classList.remove('is-open');
   renderGastos();
 });
+
+/* ========================================================================
+   LIQUIDACIONES (SETTLEMENTS)
+======================================================================== */
+
+// Calculate who owes whom with minimal transfers
+function calculateSettlements() {
+  const balances = {};
+  
+  // Initialize balances for all users
+  CHICAS.forEach(chica => {
+    balances[chica.id] = 0;
+  });
+  
+  // Calculate actual balances from gastos
+  gastos.forEach(gasto => {
+    const amount = parseFloat(gasto.amount) || 0;
+    const split = gasto.split || [];
+    const perPerson = split.length > 0 ? amount / split.length : 0;
+    
+    // Person who paid gets credit
+    if (balances.hasOwnProperty(gasto.paidBy)) {
+      balances[gasto.paidBy] += amount - perPerson;
+    }
+    
+    // People in split owe money
+    split.forEach(personId => {
+      if (balances.hasOwnProperty(personId) && personId !== gasto.paidBy) {
+        balances[personId] -= perPerson;
+      }
+    });
+  });
+  
+  // Get people who owe money (debtors) and who are owed money (creditors)
+  const debtors = [];
+  const creditors = [];
+  
+  Object.entries(balances).forEach(([userId, balance]) => {
+    if (balance < -0.01) { // Owes money (with small tolerance for rounding)
+      debtors.push({ userId, amount: Math.abs(balance) });
+    } else if (balance > 0.01) { // Is owed money
+      creditors.push({ userId, amount: balance });
+    }
+  });
+  
+  // Calculate minimal transfers
+  const transfers = [];
+  let debtorIndex = 0;
+  let creditorIndex = 0;
+  
+  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+    const debtor = debtors[debtorIndex];
+    const creditor = creditors[creditorIndex];
+    
+    const transferAmount = Math.min(debtor.amount, creditor.amount);
+    
+    if (transferAmount > 0.01) { // Only create transfer if meaningful amount
+      transfers.push({
+        from: debtor.userId,
+        to: creditor.userId,
+        amount: Math.round(transferAmount)
+      });
+    }
+    
+    debtor.amount -= transferAmount;
+    creditor.amount -= transferAmount;
+    
+    if (debtor.amount < 0.01) debtorIndex++;
+    if (creditor.amount < 0.01) creditorIndex++;
+  }
+  
+  return transfers;
+}
+
+// Get settlements state from localStorage
+function getSettlements() {
+  try {
+    return JSON.parse(localStorage.getItem('marsianas:settlements') || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+// Save settlements state to localStorage
+function saveSettlements(settlements) {
+  try {
+    localStorage.setItem('marsianas:settlements', JSON.stringify(settlements));
+  } catch (e) {}
+}
+
+// Mark transfer as paid
+function markTransferPaid(transferId) {
+  const settlements = getSettlements();
+  settlements[transferId] = { paid: true, paidAt: Date.now() };
+  saveSettlements(settlements);
+  renderLiquidaciones();
+  showNotification('¡Transferencia marcada como pagada!', 'success');
+}
+
+// Generate transfer instructions
+function generateTransferInstructions(transfer) {
+  const fromUser = CHICAS.find(c => c.id === transfer.from);
+  const toUser = CHICAS.find(c => c.id === transfer.to);
+  
+  return `${fromUser?.full || 'Usuario'} transfiere $${transfer.amount.toLocaleString()} a ${toUser?.full || 'Usuario'}`;
+}
+
+// Render liquidaciones section
+function renderLiquidaciones() {
+  const root = document.getElementById('p-liquidaciones');
+  const transfers = calculateSettlements();
+  const settlements = getSettlements();
+  
+  if (transfers.length === 0) {
+    root.innerHTML = `
+      <div class="liquidaciones-container">
+        <div class="liquidaciones-empty">
+          <span class="em">💰</span>
+          <h3>No hay liquidaciones pendientes</h3>
+          <p>¡Todas las cuentas están cuadradas!</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  
+  const totalAmount = transfers.reduce((sum, t) => sum + t.amount, 0);
+  const pendingTransfers = transfers.filter(t => !settlements[`${t.from}-${t.to}`]?.paid);
+  const completedTransfers = transfers.filter(t => settlements[`${t.from}-${t.to}`]?.paid);
+  
+  root.innerHTML = `
+    <div class="liquidaciones-container">
+      <div class="liquidaciones-summary">
+        <span class="em">💰</span>
+        <div class="liquidaciones-total">$${totalAmount.toLocaleString()}</div>
+        <div class="liquidaciones-subtitle">Total en transferencias • ${transfers.length} pagos</div>
+      </div>
+      
+      ${pendingTransfers.length > 0 ? `
+        <h3 style="color:var(--ink);margin-bottom:16px;font-weight:600">🟡 Pendientes (${pendingTransfers.length})</h3>
+        ${pendingTransfers.map(transfer => {
+          const transferId = `${transfer.from}-${transfer.to}`;
+          const fromUser = CHICAS.find(c => c.id === transfer.from);
+          const toUser = CHICAS.find(c => c.id === transfer.to);
+          
+          return `
+            <div class="transfer-card">
+              <div class="transfer-header">
+                <div class="transfer-users">
+                  <div class="transfer-avatar" style="background:${fromUser?.color || '#ccc'}">${fromUser?.emoji || '👤'}</div>
+                  <span>${fromUser?.name || 'Usuario'}</span>
+                  <div class="transfer-arrow">→</div>
+                  <div class="transfer-avatar" style="background:${toUser?.color || '#ccc'}">${toUser?.emoji || '👤'}</div>
+                  <span>${toUser?.name || 'Usuario'}</span>
+                </div>
+                <div class="transfer-amount">$${transfer.amount.toLocaleString()}</div>
+              </div>
+              <div class="transfer-actions">
+                <button class="transfer-btn secondary" onclick="copyTransferInfo('${transferId}')">
+                  📋 Copiar info
+                </button>
+                <button class="transfer-btn primary" onclick="markTransferPaid('${transferId}')">
+                  ✅ Marcar pagado
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      ` : ''}
+      
+      ${completedTransfers.length > 0 ? `
+        <h3 style="color:var(--text-2);margin:24px 0 16px;font-weight:600">✅ Completadas (${completedTransfers.length})</h3>
+        ${completedTransfers.map(transfer => {
+          const fromUser = CHICAS.find(c => c.id === transfer.from);
+          const toUser = CHICAS.find(c => c.id === transfer.to);
+          
+          return `
+            <div class="transfer-card" style="opacity:0.6">
+              <div class="transfer-header">
+                <div class="transfer-users">
+                  <div class="transfer-avatar" style="background:${fromUser?.color || '#ccc'}">${fromUser?.emoji || '👤'}</div>
+                  <span>${fromUser?.name || 'Usuario'}</span>
+                  <div class="transfer-arrow">→</div>
+                  <div class="transfer-avatar" style="background:${toUser?.color || '#ccc'}">${toUser?.emoji || '👤'}</div>
+                  <span>${toUser?.name || 'Usuario'}</span>
+                </div>
+                <div class="transfer-amount">$${transfer.amount.toLocaleString()}</div>
+              </div>
+              <div class="transfer-actions">
+                <button class="transfer-btn paid">✅ Pagado</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      ` : ''}
+    </div>
+  `;
+}
+
+// Copy transfer information
+function copyTransferInfo(transferId) {
+  const [fromId, toId] = transferId.split('-');
+  const transfers = calculateSettlements();
+  const transfer = transfers.find(t => t.from === fromId && t.to === toId);
+  
+  if (transfer) {
+    const instructions = generateTransferInstructions(transfer);
+    navigator.clipboard.writeText(instructions).then(() => {
+      showNotification('¡Información copiada al portapapeles!', 'success');
+    }).catch(() => {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = instructions;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showNotification('¡Información copiada!', 'success');
+    });
+  }
+}
+
+/* ========================================================================
+   NOTIFICATIONS
+======================================================================== */
+
+// Show notification toast
+function showNotification(message, type = 'info', title = null) {
+  const notification = document.createElement('div');
+  notification.className = `notification-toast ${type}`;
+  
+  const icons = {
+    info: '💬',
+    success: '✅', 
+    warning: '⚠️',
+    error: '❌',
+    money: '💸'
+  };
+  
+  const titles = {
+    info: 'Información',
+    success: 'Éxito',
+    warning: 'Atención', 
+    error: 'Error',
+    money: 'Nuevo gasto'
+  };
+  
+  notification.innerHTML = `
+    <div class="notification-header">
+      <span class="notification-icon">${icons[type] || '💬'}</span>
+      <span class="notification-title">${title || titles[type] || 'Notificación'}</span>
+      <button class="notification-close">×</button>
+    </div>
+    <div class="notification-message">${message}</div>
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Auto dismiss after 5 seconds
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideInRight .3s ease reverse';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          document.body.removeChild(notification);
+        }
+      }, 300);
+    }
+  }, 5000);
+  
+  // Close button
+  notification.querySelector('.notification-close').addEventListener('click', () => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideInRight .3s ease reverse';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          document.body.removeChild(notification);
+        }
+      }, 300);
+    }
+  });
+  
+  // Request notification permission if not granted
+  if ('Notification' in window && Notification.permission === 'default') {
+    requestNotificationPermission();
+  }
+  
+  // Send browser notification if permission granted
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(`Marsianas • ${title || titles[type]}`, {
+        body: message,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'marsianas-notification'
+      });
+    } catch (e) {
+      // Silent fail if notifications not supported
+    }
+  }
+}
+
+// Request notification permission
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        showNotification('¡Notificaciones activadas! Te avisaremos de cambios importantes.', 'success');
+      }
+    });
+  }
+}
+
+// Setup notification badges
+function updateNotificationBadges() {
+  // Count unread gastos (simple implementation)
+  const lastVisit = localStorage.getItem('marsianas:lastVisit') || 0;
+  const newGastos = gastos.filter(g => g.date > lastVisit).length;
+  
+  // Update gastos badge
+  const gastosTab = document.querySelector('[data-tab="gastos"]');
+  if (gastosTab) {
+    const existingBadge = gastosTab.querySelector('.notification-badge');
+    if (existingBadge) existingBadge.remove();
+    
+    if (newGastos > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'notification-badge';
+      badge.textContent = newGastos > 9 ? '9+' : newGastos;
+      gastosTab.appendChild(badge);
+    }
+  }
+}
+
+// Trigger notification for new gasto
+function notifyNewGasto(gasto) {
+  const paidByUser = CHICAS.find(c => c.id === gasto.paidBy);
+  const category = EXPENSE_CATEGORIES.find(c => c.id === gasto.category);
+  
+  const message = `${paidByUser?.name || 'Alguien'} agregó: ${gasto.desc} - $${gasto.amount.toLocaleString()}`;
+  showNotification(message, 'money', 'Nuevo gasto');
+}
+
+// Clear badges when visiting sections
+function clearSectionBadge(section) {
+  const tab = document.querySelector(`[data-tab="${section}"]`);
+  if (tab) {
+    const badge = tab.querySelector('.notification-badge');
+    if (badge) badge.remove();
+  }
+  
+  if (section === 'gastos') {
+    localStorage.setItem('marsianas:lastVisit', Date.now());
+  }
+}
 
 /* === RESERVA MODAL === */
 document.getElementById('rCancel').addEventListener('click',()=>document.getElementById('resModal').classList.remove('is-open'));
@@ -3508,10 +3959,12 @@ function renderAll(){
   renderOutfits();
   renderRes();
   renderGastos();
+  renderLiquidaciones();
   renderSorteos();
   if(!currentUser.bride) renderMars();
   renderCheck();
   renderGal();
+  updateNotificationBadges();
 }
 
 loadState();
@@ -3549,7 +4002,9 @@ async function resetAllData() {
       'marsianas:itin_deleted', 
       'marsianas:itin_extra',
       'marsianas:trivia_selected',
-      'marsianas:trivia_score'
+      'marsianas:trivia_score',
+      'marsianas:settlements',
+      'marsianas:lastVisit'
     ];
     
     keysToDelete.forEach(key => localStorage.removeItem(key));
@@ -3574,6 +4029,7 @@ async function resetAllData() {
     
     // Refresh all sections
     renderGastos();
+    renderLiquidaciones();
     renderRes(); 
     renderCheck();
     renderItin();
@@ -3591,8 +4047,23 @@ async function resetAllData() {
 // Make it available globally for console access
 window.resetAllData = resetAllData;
 
+// Make liquidaciones functions globally available
+window.markTransferPaid = markTransferPaid;
+window.copyTransferInfo = copyTransferInfo;
+
+// Make notification functions globally available  
+window.showNotification = showNotification;
+window.requestNotificationPermission = requestNotificationPermission;
+
 // Initialize Supabase when app loads
 initSupabase();
+
+// Request notification permission on load
+setTimeout(() => {
+  if ('Notification' in window && Notification.permission === 'default') {
+    requestNotificationPermission();
+  }
+}, 2000);
 
 if(!tryAutoLogin()){
   // stay on login
