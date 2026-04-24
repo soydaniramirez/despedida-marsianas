@@ -424,6 +424,19 @@
   .gasto-amt{font-family:var(--display);font-weight:700;font-size:18px;text-align:right}
   .gasto-amt small{display:block;font-size:10px;font-family:var(--body);font-weight:500;color:var(--ink-soft);opacity:.7;margin-top:1px}
   .gasto-del{color:var(--pink);font-size:18px;padding:4px;opacity:.5}
+  
+  .category-badge{
+    display:inline-block;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    padding:3px 6px;
+    border-radius:6px;
+    margin-right:8px;
+    margin-bottom:2px;
+    white-space:nowrap;
+  }
   .gasto-del:active{opacity:1}
 
   .por-persona{
@@ -958,8 +971,16 @@
       <input type="text" id="gDesc" placeholder="Cena en Carta Ajena"/>
     </div>
     <div class="field">
+      <label>Categoría</label>
+      <select id="gCategory"></select>
+    </div>
+    <div class="field">
       <label>Monto (MXN)</label>
       <input type="number" id="gAmt" placeholder="0" inputmode="decimal"/>
+    </div>
+    <div class="field">
+      <label>Método de pago</label>
+      <select id="gPaymentMethod"></select>
     </div>
     <div class="field">
       <label>¿Quién pagó?</label>
@@ -1244,6 +1265,24 @@ const RESERVAS = [
   {icon:'🍽️', title:'Cena despedida Montesacro', meta:'Domingo 3 · 8:00 pm · pedir balcón con vista', status:'pending', phone:'+57 316 2757326'},
 ];
 
+// Expense categories
+const EXPENSE_CATEGORIES = [
+  {id: 'food', name: 'Comida', icon: '🍽️', color: '#FF6B6B'},
+  {id: 'transport', name: 'Transporte', icon: '🚗', color: '#4ECDC4'},  
+  {id: 'accommodation', name: 'Alojamiento', icon: '🏨', color: '#45B7D1'},
+  {id: 'activities', name: 'Actividades', icon: '🎉', color: '#96CEB4'},
+  {id: 'beauty', name: 'Belleza', icon: '💄', color: '#FECA57'},
+  {id: 'shopping', name: 'Compras', icon: '🛍️', color: '#FF9FF3'},
+  {id: 'other', name: 'Otros', icon: '💰', color: '#BDC3C7'}
+];
+
+// Payment methods  
+const PAYMENT_METHODS = [
+  {id: 'cash', name: 'Efectivo', icon: '💵'},
+  {id: 'card', name: 'Tarjeta', icon: '💳'},
+  {id: 'transfer', name: 'Transferencia', icon: '📱'}
+];
+
 const CHECKLIST_DEFAULT = [
   {cat:'Documentos', text:'Pasaporte vigente (mínimo 6 meses)'},
   {cat:'Documentos', text:'Copia digital del pasaporte en el celular'},
@@ -1490,7 +1529,9 @@ async function saveGastoToSupabase(gasto) {
   try {
     const { error } = await db.from('gastos').insert({
       desc: gasto.desc,
+      category: gasto.category,
       amount: gasto.amount,
+      payment_method: gasto.paymentMethod,
       paid_by: gasto.paidBy,
       split: gasto.split,
       exclude_bride: gasto.excludeBride
@@ -1526,7 +1567,9 @@ async function refreshGastosFromSupabase() {
     gastos = data.map(g => ({
       id: g.id,
       desc: g.desc,
+      category: g.category || 'other',
       amount: g.amount,
+      paymentMethod: g.payment_method || 'cash',
       paidBy: g.paid_by,
       split: g.split,
       excludeBride: g.exclude_bride,
@@ -2353,11 +2396,23 @@ function renderGastos(){
         let split = g.split.slice();
         if(g.excludeBride) split = split.filter(id=>id!=='mars');
         const splitNames = split.map(id=>CHICAS.find(c=>c.id===id).name).join(', ');
+        
+        // Get category info
+        const category = EXPENSE_CATEGORIES.find(cat => cat.id === (g.category || 'other'));
+        const paymentMethod = PAYMENT_METHODS.find(pm => pm.id === (g.paymentMethod || 'cash'));
+        
         return `
           <div class="gasto-card">
             <div class="gasto-info">
-              <div class="gasto-title">${g.desc}${g.excludeBride?' 👰🏻🚫':''}</div>
-              <div class="gasto-meta">Pagó <b>${payer.name}</b> · entre ${split.length} (${splitNames})</div>
+              <div class="gasto-title">
+                <span class="category-badge" style="background:${category.color}20;color:${category.color};border:1px solid ${category.color}30">
+                  ${category.icon} ${category.name}
+                </span>
+                ${g.desc}${g.excludeBride?' 👰🏻🚫':''}
+              </div>
+              <div class="gasto-meta">
+                ${paymentMethod.icon} Pagó <b>${payer.name}</b> · entre ${split.length} (${splitNames})
+              </div>
             </div>
             <div class="gasto-amt">${fmtMoney(g.amount)}<small>${fmtMoney(g.amount/split.length)}/c.u.</small></div>
             <button class="gasto-del" data-idx="${realIdx}" title="Eliminar">×</button>
@@ -2409,18 +2464,36 @@ function renderGastos(){
 ======================================================================== */
 function openGastoModal(){
   const m = document.getElementById('gastoModal');
-  // populate
+  
+  // Populate user selector
   const paidSel = document.getElementById('gPaid');
   paidSel.innerHTML = CHICAS.map(c=>`<option value="${c.id}" ${c.id===currentUser.id?'selected':''}>${c.emoji} ${c.full}</option>`).join('');
+  
+  // Populate category selector  
+  const catSel = document.getElementById('gCategory');
+  catSel.innerHTML = EXPENSE_CATEGORIES.map(cat => 
+    `<option value="${cat.id}"${cat.id==='food'?' selected':''}>${cat.icon} ${cat.name}</option>`
+  ).join('');
+  
+  // Populate payment method selector
+  const paymentSel = document.getElementById('gPaymentMethod'); 
+  paymentSel.innerHTML = PAYMENT_METHODS.map(pm =>
+    `<option value="${pm.id}"${pm.id==='cash'?' selected':''}>${pm.icon} ${pm.name}</option>`
+  ).join('');
+  
+  // Populate split selector
   const splitWrap = document.getElementById('gSplit');
   splitWrap.innerHTML = CHICAS.map(c=>`
     <button type="button" class="chip is-on" data-id="${c.id}">
       <span class="av" style="background:${c.color}">${c.emoji}</span>${c.name}
     </button>
   `).join('');
+  
   splitWrap.querySelectorAll('.chip').forEach(b=>{
     b.addEventListener('click',()=>b.classList.toggle('is-on'));
   });
+  
+  // Reset form
   document.getElementById('gDesc').value='';
   document.getElementById('gAmt').value='';
   document.getElementById('gExcludeBride').checked = false;
@@ -2432,16 +2505,28 @@ document.getElementById('gastoModal').addEventListener('click',e=>{
 });
 document.getElementById('gSave').addEventListener('click',async ()=>{
   const desc = document.getElementById('gDesc').value.trim();
+  const category = document.getElementById('gCategory').value;
   const amt = parseFloat(document.getElementById('gAmt').value);
+  const paymentMethod = document.getElementById('gPaymentMethod').value;
   const paidBy = document.getElementById('gPaid').value;
   const split = Array.from(document.querySelectorAll('#gSplit .chip.is-on')).map(c=>c.dataset.id);
   const excludeBride = document.getElementById('gExcludeBride').checked;
+  
   if(!desc || !amt || amt<=0 || !split.length){
     alert('Completa todos los campos y selecciona al menos una persona en el split.');
     return;
   }
   
-  const newGasto = {desc, amount:amt, paidBy, split, excludeBride, date:Date.now()};
+  const newGasto = {
+    desc, 
+    category, 
+    amount: amt, 
+    paymentMethod, 
+    paidBy, 
+    split, 
+    excludeBride, 
+    date: Date.now()
+  };
   
   // Save to Supabase first
   await saveGastoToSupabase(newGasto);
