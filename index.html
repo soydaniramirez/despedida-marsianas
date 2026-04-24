@@ -1411,44 +1411,83 @@ function subscribeToRealtimeUpdates() {
   if (!db) return;
 
   // Listen to gastos changes
-  db.channel('gastos-changes')
-    .on('postgres_changes', { event: '*', table: 'gastos' }, () => {
-      console.log('💸 Gastos data changed, refreshing...');
+  const gastosChannel = db.channel('gastos-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'gastos' 
+    }, (payload) => {
+      console.log('💸 Gastos data changed, refreshing...', payload);
       refreshGastosFromSupabase();
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('💸 Gastos subscription status:', status);
+    });
 
   // Listen to reservas changes  
-  db.channel('reservas-changes')
-    .on('postgres_changes', { event: '*', table: 'reservas' }, () => {
-      console.log('📍 Reservas data changed, refreshing...');
+  const reservasChannel = db.channel('reservas-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'reservas' 
+    }, (payload) => {
+      console.log('📍 Reservas data changed, refreshing...', payload);
       refreshReservasFromSupabase();
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('📍 Reservas subscription status:', status);
+    });
 
   // Listen to pendientes changes
-  db.channel('pendientes-changes')
-    .on('postgres_changes', { event: '*', table: 'pendientes' }, () => {
-      console.log('✅ Pendientes data changed, refreshing...');
+  const pendientesChannel = db.channel('pendientes-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'pendientes' 
+    }, (payload) => {
+      console.log('✅ Pendientes data changed, refreshing...', payload);
       refreshChecklistFromSupabase();
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('✅ Pendientes subscription status:', status);
+    });
 
   // Listen to itinerario changes
-  db.channel('itinerario-changes')
-    .on('postgres_changes', { event: '*', table: 'itinerario_eventos' }, () => {
-      console.log('📅 Itinerario data changed, refreshing...');
+  const itinerarioChannel = db.channel('itinerario-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'itinerario_eventos' 
+    }, (payload) => {
+      console.log('📅 Itinerario data changed, refreshing...', payload);
       refreshItinerarioFromSupabase();
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('📅 Itinerario subscription status:', status);
+    });
 
   // Listen to trivia config changes
-  db.channel('trivia-changes')
-    .on('postgres_changes', { event: '*', table: 'trivia_config' }, () => {
-      console.log('🎯 Trivia data changed, refreshing...');
+  const triviaChannel = db.channel('trivia-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'trivia_config' 
+    }, (payload) => {
+      console.log('🎯 Trivia data changed, refreshing...', payload);
       refreshTriviaFromSupabase();
     })
-    .subscribe();
+    .subscribe((status) => {
+      console.log('🎯 Trivia subscription status:', status);
+    });
+
+  // Store subscriptions globally for debugging
+  window.gastosSubscription = gastosChannel;
+  window.reservasSubscription = reservasChannel;
+  window.pendientesSubscription = pendientesChannel;
+  window.itinerarioSubscription = itinerarioChannel;
+  window.triviaSubscription = triviaChannel;
+  
+  console.log('🔄 All real-time subscriptions configured');
 }
 
 let currentUser = null;
