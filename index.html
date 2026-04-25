@@ -1618,19 +1618,51 @@ async function seedDataIfNeeded() {
   if (!db) return;
   
   try {
-    // Check if we need to seed reservas
-    const { data: reservasData, error: reservasError } = await db.from('reservas').select('*').limit(1);
-    if (!reservasError && reservasData.length === 0) {
-      console.log('🌱 Seeding reservas data...');
-      const reservasToInsert = RESERVAS.map((r, idx) => ({
-        icon: r.icon,
-        title: r.title,
-        meta: r.meta,
-        status: r.status || 'pending',
-        phone: r.phone || null,
-        base_key: `base_${idx}`
-      }));
-      await db.from('reservas').insert(reservasToInsert);
+    // Check for missing base reservas and insert them
+    console.log('🔍 Checking for base reservas in Supabase...');
+    
+    // Check which base_keys already exist
+    const { data: existingBase, error: baseError } = await db
+      .from('reservas')
+      .select('base_key')
+      .not('base_key', 'is', null);
+    
+    if (baseError) {
+      console.error('❌ Error checking base reservas:', baseError);
+      return;
+    }
+    
+    const existingBaseKeys = existingBase.map(r => r.base_key);
+    console.log('📋 Existing base_keys in DB:', existingBaseKeys);
+    
+    // Find missing base reservas
+    const missingReservas = [];
+    RESERVAS.forEach((r, idx) => {
+      const baseKey = `base_${idx}`;
+      if (!existingBaseKeys.includes(baseKey)) {
+        missingReservas.push({
+          icon: r.icon,
+          title: r.title,
+          meta: r.meta,
+          status: r.status || 'pending',
+          phone: r.phone || null,
+          base_key: baseKey
+        });
+      }
+    });
+    
+    if (missingReservas.length > 0) {
+      console.log(`🌱 Seeding ${missingReservas.length} missing base reservas...`);
+      console.log('📋 Missing base_keys:', missingReservas.map(r => r.base_key));
+      
+      const { error: insertError } = await db.from('reservas').insert(missingReservas);
+      if (insertError) {
+        console.error('❌ Error seeding reservas:', insertError);
+      } else {
+        console.log('✅ Base reservas seeded successfully');
+      }
+    } else {
+      console.log('✅ All base reservas already exist');
     }
 
     // Check if we need to seed pendientes
@@ -1659,13 +1691,13 @@ async function saveGastoToSupabase(gasto) {
   
   try {
     const { error } = await db.from('gastos').insert({
-      desc: gasto.desc,
-      category: gasto.category,
-      amount: gasto.amount,
-      payment_method: gasto.paymentMethod,
-      paid_by: gasto.paidBy,
-      split: gasto.split,
-      exclude_bride: gasto.excludeBride
+      descripcion: gasto.desc,
+      categoria: gasto.category,
+      monto: gasto.amount,
+      metodo_pago: gasto.paymentMethod,
+      quien_pago: gasto.paidBy,
+      entre_quienes: gasto.split,
+      excluir_novia: gasto.excludeBride
     });
     if (error) throw error;
     console.log('💾 Gasto saved to Supabase');
@@ -1802,17 +1834,22 @@ async function refreshReservasFromSupabase() {
   if (!db) return;
   
   try {
+    console.log('🔄 REFRESH DEBUG: Starting refresh from Supabase...');
     const { data, error } = await db.from('reservas').select('*').order('created_at', { ascending: true });
     if (error) throw error;
     
+    console.log('🔄 REFRESH DEBUG: Supabase data received:', data.length, 'records');
+    console.log('🔄 REFRESH DEBUG: Before refresh resStatusOverrides:', resStatusOverrides);
+    
     // Update our local arrays based on Supabase data
-    // DON'T clear resStatusOverrides - preserve localStorage for non-base items
     const newResExtra = [];
     
     data.forEach(r => {
       if (r.base_key) {
         // This is a base reserva, update status from Supabase
+        const oldStatus = resStatusOverrides[r.base_key];
         resStatusOverrides[r.base_key] = r.status;
+        console.log(`🔄 REFRESH DEBUG: Base ${r.base_key}: ${oldStatus} → ${r.status}`);
       } else {
         // This is a custom reserva
         newResExtra.push({
@@ -1823,6 +1860,7 @@ async function refreshReservasFromSupabase() {
           phone: r.phone,
           status: r.status
         });
+        console.log(`🔄 REFRESH DEBUG: Custom reserva loaded: ${r.title}`);
       }
     });
     
@@ -1831,11 +1869,12 @@ async function refreshReservasFromSupabase() {
     
     // Save updated status overrides to localStorage
     saveResStatus();
+    console.log('🔄 REFRESH DEBUG: After refresh resStatusOverrides:', resStatusOverrides);
     
     renderRes();
-    console.log('🔄 Reservas refreshed from Supabase');
+    console.log('🔄 REFRESH DEBUG: Reservas refreshed from Supabase successfully');
   } catch (error) {
-    console.error('❌ Error refreshing reservas:', error);
+    console.error('❌ REFRESH DEBUG: Error refreshing reservas:', error);
   }
 }
 
@@ -2408,8 +2447,9 @@ function getAllReservas(){
     .filter(r => !resDeleted[r._key]);
   const custom = resExtra.map((r,i)=>({
     ...r,
-    status: resStatusOverrides['ext_'+i] || r.status,
-    _key:'ext_'+i,
+    // Use real Supabase ID as key for custom reservas, fallback to ext_i for local-only
+    _key: r.id ? `custom_${r.id}` : `ext_${i}`,
+    status: resStatusOverrides[r.id ? `custom_${r.id}` : `ext_${i}`] || r.status,
     _custom:true,
     _customIdx:i
   }));
@@ -2451,29 +2491,42 @@ function renderRes(){
       const k = dropdown.dataset.toggle;
       const newStatus = dropdown.value;
       
-      console.log(`🔄 Changing status: ${k} → ${newStatus}`);
+      console.log(`🔄 TOGGLE DEBUG: key=${k}, newStatus=${newStatus}`);
+      console.log(`🔄 TOGGLE DEBUG: isBase=${k.startsWith('base_')}`);
+      console.log(`🔄 TOGGLE DEBUG: previous resStatusOverrides:`, resStatusOverrides);
       
       // Update in Supabase if this is a base reserva
       if (k.startsWith('base_')) {
-        console.log(`💾 Updating in Supabase: ${k} = ${newStatus}`);
+        console.log(`💾 TOGGLE DEBUG: Updating base reserva ${k} to ${newStatus} in Supabase`);
         
-        // Update local state FIRST to prevent overwrite
-        resStatusOverrides[k] = newStatus;
-        saveResStatus();
-        
-        // Then update Supabase
-        await toggleResStatusInSupabase(k, newStatus);
-        
-        // Don't refresh - keep local state
-        renderRes();
+        try {
+          await toggleResStatusInSupabase(k, newStatus);
+          console.log(`✅ TOGGLE DEBUG: Supabase update completed for ${k}`);
+          
+          // Update local state after successful Supabase update
+          resStatusOverrides[k] = newStatus;
+          saveResStatus();
+          console.log(`✅ TOGGLE DEBUG: Local state updated:`, resStatusOverrides);
+          
+          // Refresh from Supabase to get latest state
+          await refreshReservasFromSupabase();
+          console.log(`✅ TOGGLE DEBUG: Refresh completed`);
+          
+        } catch (error) {
+          console.error(`❌ TOGGLE DEBUG: Supabase error for ${k}:`, error);
+          // Don't update local state if Supabase failed
+          dropdown.value = resStatusOverrides[k] || 'pending';
+        }
       } else {
+        console.log(`📱 TOGGLE DEBUG: Updating custom reserva ${k} locally only`);
         // Update local state immediately for UI responsiveness
         resStatusOverrides[k] = newStatus;
         saveResStatus();
         renderRes();
+        console.log(`✅ TOGGLE DEBUG: Custom reserva updated locally`);
       }
       
-      console.log(`✅ Status updated successfully`);
+      console.log(`✅ TOGGLE DEBUG: Final resStatusOverrides:`, resStatusOverrides);
     });
   });
   
