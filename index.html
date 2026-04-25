@@ -2456,10 +2456,16 @@ function renderRes(){
       // Update in Supabase if this is a base reserva
       if (k.startsWith('base_')) {
         console.log(`💾 Updating in Supabase: ${k} = ${newStatus}`);
+        
+        // Update local state FIRST to prevent overwrite
+        resStatusOverrides[k] = newStatus;
+        saveResStatus();
+        
+        // Then update Supabase
         await toggleResStatusInSupabase(k, newStatus);
         
-        // Force refresh from Supabase to get latest state
-        await refreshReservasFromSupabase();
+        // Don't refresh - keep local state
+        renderRes();
       } else {
         // Update local state immediately for UI responsiveness
         resStatusOverrides[k] = newStatus;
