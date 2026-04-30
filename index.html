@@ -147,12 +147,20 @@
   .topbar-left{display:flex;align-items:center;gap:10px}
   .topbar-right{display:flex;align-items:center;gap:10px}
   .connection-indicator{
-    font-size:8px;
-    transition:color 0.3s ease;
-    cursor:default;
+    font-size:14px;
+    transition:all 0.3s ease;
+    cursor:pointer;
+    user-select:none;
+    line-height:1;
   }
-  .connection-indicator.connected{
-    color:#0BCE91;
+  .connection-indicator::before{
+    content:"\1F534";
+  }
+  .connection-indicator.connected::before{
+    content:"\1F7E2";
+  }
+  .connection-indicator.connecting::before{
+    content:"\1F7E1";
   }
   .me-av{
     width:36px;height:36px;border-radius:12px;
@@ -985,7 +993,7 @@
       </div>
     </div>
     <div class="topbar-right">
-      <div id="connectionStatus" class="connection-indicator" title="Estado de sincronización">🔴</div>
+      <div id="connectionStatus" class="connection-indicator" title="Tap para ver estado de sincronización"></div>
       <button class="logout" id="logoutBtn">Salir</button>
     </div>
   </header>
@@ -1452,7 +1460,7 @@ function getUserScopedKey(baseKey, userId) {
 
 // ================= SUPABASE CONFIGURATION =================
 const SUPABASE_URL = 'https://dehainqlrjvawguzktti.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGFpbnFscmp2YXdndXprdHRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQ1Mzc1NzIsImV4cCI6MjA1MDExMzU3Mn0.1-YeU-QVf1EIwM2uNOkTK5OHCf4QZn9R0y_ik5nWFQg'; // Legacy anon key
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGFpbnFscmp2YXdndXprdHRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjA2NTgsImV4cCI6MjA5MjUzNjY1OH0.MgFHOkJ51zwKLzmekTAM4wXrnMqmh1VxGAyIWkyXzTo'; // anon public key
 let db;
 let isSupabaseConnected = false;
 
@@ -1468,36 +1476,58 @@ function setupAutoReconnect() {
   }, 30000); // Every 30 seconds
 }
 
-function initSupabase() {
+async function initSupabase() {
+  showConnectionStatus('connecting');
   try {
+    if (typeof supabase === 'undefined') {
+      console.error('❌ Supabase library no cargó - revisa internet');
+      isSupabaseConnected = false;
+      showConnectionStatus(false);
+      return;
+    }
     db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    console.log('🔍 Probando conexión con Supabase...');
+    const { error: testError } = await db.from('gastos').select('id').limit(1);
+    if (testError) {
+      console.error('❌ Test query falló:', testError.message);
+      if (testError.message.includes('JWT') || testError.message.includes('API key') || testError.message.includes('Invalid')) {
+        console.error('   → Tu anon key es inválida o expirada');
+      } else if (testError.message.includes('does not exist') || testError.code === '42P01') {
+        console.error('   → Faltan tablas en Supabase');
+      } else if (testError.message.includes('row-level') || testError.code === '42501') {
+        console.error('   → RLS está bloqueando - desactívalo');
+      }
+      isSupabaseConnected = false;
+      showConnectionStatus(false);
+      return;
+    }
     isSupabaseConnected = true;
-    console.log('✅ Supabase connected');
-    
-    // Setup auto-reconnection for stability
+    console.log('✅ Supabase conectado y verificado');
     setupAutoReconnect();
-    
-    // Subscribe to realtime changes
     subscribeToRealtimeUpdates();
-    
-    // Seed data if needed
-    seedDataIfNeeded();
-    
-    // Show connection indicator
+    await seedDataIfNeeded();
     showConnectionStatus(true);
   } catch (error) {
-    console.error('❌ Supabase connection failed:', error);
+    console.error('❌ Error al conectar:', error);
     isSupabaseConnected = false;
     showConnectionStatus(false);
   }
 }
 
 // Connection status indicator
-function showConnectionStatus(connected) {
+function showConnectionStatus(state) {
   const indicator = document.getElementById('connectionStatus');
   if (!indicator) return;
-  indicator.classList.toggle('connected', connected);
-  indicator.title = connected ? 'Sincronizado 🟢' : 'Sin conexión 🔴';
+  indicator.classList.remove('connected', 'connecting');
+  if (state === true) {
+    indicator.classList.add('connected');
+    indicator.title = '🟢 Sincronizado con Supabase';
+  } else if (state === 'connecting') {
+    indicator.classList.add('connecting');
+    indicator.title = '🟡 Conectando con Supabase...';
+  } else {
+    indicator.title = '🔴 Sin conexión - revisa internet o la consola';
+  }
 }
 
 // ================= REALTIME SUBSCRIPTIONS =================
@@ -4177,8 +4207,13 @@ window.toggleLiquidacionesCurrency = toggleLiquidacionesCurrency;
 window.showNotification = showNotification;
 window.requestNotificationPermission = requestNotificationPermission;
 
-// Initialize Supabase when app loads
-initSupabase();
+// Initialize Supabase when app loads (async)
+initSupabase().then(() => {
+  console.log('🚀 Init de Supabase completado. Conectado:', isSupabaseConnected);
+  if (!isSupabaseConnected) {
+    console.warn('⚠️ La app funcionará en modo offline. Revisa errores arriba.');
+  }
+}).catch(err => console.error('💥 Error fatal:', err));
 
 // Request notification permission on load
 setTimeout(() => {
