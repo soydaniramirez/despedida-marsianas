@@ -1432,6 +1432,10 @@ const KEY_ITIN_EXTRA = 'marsianas:itin_extra';
 const KEY_TRIVIA_SELECTED = 'marsianas:trivia_selected';
 const KEY_TRIVIA_SCORE = 'marsianas:trivia_score';
 
+// Currency conversion constants
+const COP_TO_MXN_RATE = 0.0048; // 1 COP = 0.0048 MXN (Google rate)
+const MXN_TO_COP_RATE = 208.33; // 1 MXN = 208.33 COP
+
 // Helper function to get user-scoped storage key
 function getUserScopedKey(baseKey, userId) {
   if (!userId) return baseKey;
@@ -1593,6 +1597,9 @@ let itinDeleted = {};         // { 'd1_i0': true }
 let itinExtra = {};           // { '1': [{time, title, loc, tag}], ... } por día
 let triviaSelected = {};      // { questionId: true }
 let triviaScore = {a:0, b:0};
+
+// Currency display state for liquidaciones
+let liquidacionesCurrency = 'COP'; // 'COP' or 'MXN'
 
 function loadState(){
   const userId = currentUser?.id;
@@ -2888,12 +2895,25 @@ function renderLiquidaciones() {
   const pendingTransfers = transfers.filter(t => !settlements[`${t.from}-${t.to}`]?.paid);
   const completedTransfers = transfers.filter(t => settlements[`${t.from}-${t.to}`]?.paid);
   
+  // Convert amounts if showing MXN
+  const displayTotalAmount = liquidacionesCurrency === 'MXN' ? convertCOPtoMXN(totalAmount) : totalAmount;
+  
   root.innerHTML = `
     <div class="liquidaciones-container">
       <div class="liquidaciones-summary">
         <span class="em">💰</span>
-        <div class="liquidaciones-total">$${totalAmount.toLocaleString()}</div>
+        <div class="liquidaciones-total">${formatCurrency(displayTotalAmount, liquidacionesCurrency)}</div>
         <div class="liquidaciones-subtitle">Total en transferencias • ${transfers.length} pagos</div>
+      </div>
+      
+      <!-- Currency Toggle -->
+      <div style="text-align: center; margin: 20px 0;">
+        <button onclick="toggleLiquidacionesCurrency()" style="
+          background: var(--magenta); color: white; border: none; 
+          padding: 8px 16px; border-radius: 12px; font-weight: 600;
+          font-size: 14px; cursor: pointer;">
+          💱 ${liquidacionesCurrency === 'COP' ? '🇨🇴 Ver en MXN' : '🇲🇽 Ver en COP'}
+        </button>
       </div>
       
       ${pendingTransfers.length > 0 ? `
@@ -2902,6 +2922,9 @@ function renderLiquidaciones() {
           const transferId = `${transfer.from}-${transfer.to}`;
           const fromUser = CHICAS.find(c => c.id === transfer.from);
           const toUser = CHICAS.find(c => c.id === transfer.to);
+          
+          // Convert amount based on selected currency
+          const displayAmount = liquidacionesCurrency === 'MXN' ? convertCOPtoMXN(transfer.amount) : transfer.amount;
           
           return `
             <div class="transfer-card">
@@ -2913,7 +2936,7 @@ function renderLiquidaciones() {
                   <div class="transfer-avatar" style="background:${toUser?.color || '#ccc'}">${toUser?.emoji || '👤'}</div>
                   <span>${toUser?.name || 'Usuario'}</span>
                 </div>
-                <div class="transfer-amount">$${transfer.amount.toLocaleString()}</div>
+                <div class="transfer-amount">${formatCurrency(displayAmount, liquidacionesCurrency)}</div>
               </div>
               <div class="transfer-actions">
                 <button class="transfer-btn secondary" onclick="copyTransferInfo('${transferId}')">
@@ -2934,6 +2957,9 @@ function renderLiquidaciones() {
           const fromUser = CHICAS.find(c => c.id === transfer.from);
           const toUser = CHICAS.find(c => c.id === transfer.to);
           
+          // Convert amount based on selected currency
+          const displayAmount = liquidacionesCurrency === 'MXN' ? convertCOPtoMXN(transfer.amount) : transfer.amount;
+          
           return `
             <div class="transfer-card" style="opacity:0.6">
               <div class="transfer-header">
@@ -2944,7 +2970,7 @@ function renderLiquidaciones() {
                   <div class="transfer-avatar" style="background:${toUser?.color || '#ccc'}">${toUser?.emoji || '👤'}</div>
                   <span>${toUser?.name || 'Usuario'}</span>
                 </div>
-                <div class="transfer-amount">$${transfer.amount.toLocaleString()}</div>
+                <div class="transfer-amount">${formatCurrency(displayAmount, liquidacionesCurrency)}</div>
               </div>
               <div class="transfer-actions">
                 <button class="transfer-btn paid">✅ Pagado</button>
@@ -2978,6 +3004,28 @@ function copyTransferInfo(transferId) {
       showNotification('¡Información copiada!', 'success');
     });
   }
+}
+
+// Currency conversion helpers
+function convertCOPtoMXN(copAmount) {
+  return Math.round(copAmount * COP_TO_MXN_RATE);
+}
+
+function convertMXNtoCOP(mxnAmount) {
+  return Math.round(mxnAmount * MXN_TO_COP_RATE);
+}
+
+function formatCurrency(amount, currency) {
+  if (currency === 'MXN') {
+    return `$${amount.toLocaleString()} MXN`;
+  } else {
+    return `$${amount.toLocaleString()} COP`;
+  }
+}
+
+function toggleLiquidacionesCurrency() {
+  liquidacionesCurrency = liquidacionesCurrency === 'COP' ? 'MXN' : 'COP';
+  renderLiquidaciones();
 }
 
 /* ========================================================================
@@ -4123,6 +4171,7 @@ window.resetAllData = resetAllData;
 // Make liquidaciones functions globally available
 window.markTransferPaid = markTransferPaid;
 window.copyTransferInfo = copyTransferInfo;
+window.toggleLiquidacionesCurrency = toggleLiquidacionesCurrency;
 
 // Make notification functions globally available  
 window.showNotification = showNotification;
