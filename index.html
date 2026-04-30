@@ -1504,123 +1504,60 @@ function showConnectionStatus(connected) {
 function subscribeToRealtimeUpdates() {
   if (!db) return;
 
-  try {
-    console.log('🔄 Setting up real-time subscriptions...');
+  // Listen to gastos changes
+  const gastosChannel = db.channel('gastos-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'gastos' 
+    }, (payload) => {
+      console.log('💸 Gastos data changed, refreshing...', payload);
+      refreshGastosFromSupabase();
+    })
+    .subscribe((status) => {
+      console.log('💸 Gastos subscription status:', status);
+    });
 
-    // Debounced refresh functions to prevent spam
-    let gastosRefreshTimeout;
-    let reservasRefreshTimeout;
-    let pendientesRefreshTimeout;
+  // Listen to reservas changes  
+  const reservasChannel = db.channel('reservas-changes')
+    .on('postgres_changes', { 
+      event: '*', 
+      schema: 'public', 
+      table: 'reservas' 
+    }, (payload) => {
+      console.log('📍 Reservas data changed, refreshing...', payload);
+      refreshReservasFromSupabase();
+    })
+    .subscribe((status) => {
+      console.log('📍 Reservas subscription status:', status);
+    });
 
-    const debouncedGastosRefresh = () => {
-      clearTimeout(gastosRefreshTimeout);
-      gastosRefreshTimeout = setTimeout(() => {
-        console.log('💸 Refreshing gastos (debounced)...');
-        refreshGastosFromSupabase();
-      }, 500);
-    };
-
-    const debouncedReservasRefresh = () => {
-      clearTimeout(reservasRefreshTimeout);
-      reservasRefreshTimeout = setTimeout(() => {
-        console.log('📍 Refreshing reservas (debounced)...');
-        refreshReservasFromSupabase();
-      }, 500);
-    };
-
-    const debouncedPendientesRefresh = () => {
-      clearTimeout(pendientesRefreshTimeout);
-      pendientesRefreshTimeout = setTimeout(() => {
-        console.log('✅ Refreshing pendientes (debounced)...');
-        refreshChecklistFromSupabase();
-      }, 500);
-    };
-
-    // Listen to gastos changes with error handling
-    const gastosChannel = db.channel('gastos-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'gastos' 
-      }, (payload) => {
-        console.log('💸 Gastos data changed:', payload.eventType);
-        debouncedGastosRefresh();
-        
-        // Show notification for new gastos (but not for manual sync)
-        if (payload.eventType === 'INSERT' && payload.new && !window.syncInProgress) {
-          const newGasto = payload.new;
-          const isMyGasto = newGasto.quien_pago === currentUser?.id;
-          
-          if (!isMyGasto && typeof showNotification === 'function') {
-            const userName = CHICAS.find(c => c.id === newGasto.quien_pago)?.name || 'Alguien';
-            showNotification(`💸 ${userName} agregó: ${newGasto.descripcion}`, 'info');
-          }
-        }
-      })
-      .subscribe((status, error) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Gastos real-time connected');
-        } else if (status === 'CHANNEL_ERROR' || error) {
-          console.warn('⚠️ Gastos real-time error - manual sync available');
-        }
-      });
-
-    // Listen to reservas changes with error handling
-    const reservasChannel = db.channel('reservas-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'reservas' 
-      }, (payload) => {
-        console.log('📍 Reservas data changed:', payload.eventType);
-        debouncedReservasRefresh();
-      })
-      .subscribe((status, error) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Reservas real-time connected');
-        } else if (status === 'CHANNEL_ERROR' || error) {
-          console.warn('⚠️ Reservas real-time error - manual sync available');
-        }
-      });
-
-  // Listen to pendientes changes with error handling
+  // Listen to pendientes changes
   const pendientesChannel = db.channel('pendientes-changes')
     .on('postgres_changes', { 
       event: '*', 
       schema: 'public', 
       table: 'pendientes' 
     }, (payload) => {
-      console.log('✅ Pendientes data changed:', payload.eventType);
-      debouncedPendientesRefresh();
+      console.log('✅ Pendientes data changed, refreshing...', payload);
+      refreshChecklistFromSupabase();
     })
-    .subscribe((status, error) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ Pendientes real-time connected');
-      } else if (status === 'CHANNEL_ERROR' || error) {
-        console.warn('⚠️ Pendientes real-time error - manual sync available');
-      }
+    .subscribe((status) => {
+      console.log('✅ Pendientes subscription status:', status);
     });
 
-  // Listen to itinerario changes with error handling
+  // Listen to itinerario changes
   const itinerarioChannel = db.channel('itinerario-changes')
     .on('postgres_changes', { 
       event: '*', 
       schema: 'public', 
       table: 'itinerario_eventos' 
     }, (payload) => {
-      console.log('📅 Itinerario data changed:', payload.eventType);
-      // Debounce itinerario refresh too
-      clearTimeout(window.itinerarioRefreshTimeout);
-      window.itinerarioRefreshTimeout = setTimeout(() => {
-        refreshItinerarioFromSupabase();
-      }, 500);
+      console.log('📅 Itinerario data changed, refreshing...', payload);
+      refreshItinerarioFromSupabase();
     })
-    .subscribe((status, error) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ Itinerario real-time connected');
-      } else if (status === 'CHANNEL_ERROR' || error) {
-        console.warn('⚠️ Itinerario real-time error - manual sync available');
-      }
+    .subscribe((status) => {
+      console.log('📅 Itinerario subscription status:', status);
     });
 
   // Listen to trivia config changes
@@ -1630,18 +1567,11 @@ function subscribeToRealtimeUpdates() {
       schema: 'public', 
       table: 'trivia_config' 
     }, (payload) => {
-      console.log('🎯 Trivia data changed:', payload.eventType);
-      clearTimeout(window.triviaRefreshTimeout);
-      window.triviaRefreshTimeout = setTimeout(() => {
-        refreshTriviaFromSupabase();
-      }, 500);
+      console.log('🎯 Trivia data changed, refreshing...', payload);
+      refreshTriviaFromSupabase();
     })
-    .subscribe((status, error) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ Trivia real-time connected');
-      } else if (status === 'CHANNEL_ERROR' || error) {
-        console.warn('⚠️ Trivia real-time error');
-      }
+    .subscribe((status) => {
+      console.log('🎯 Trivia subscription status:', status);
     });
 
   // Store subscriptions globally for debugging
@@ -4249,111 +4179,6 @@ window.requestNotificationPermission = requestNotificationPermission;
 
 // Initialize Supabase when app loads
 initSupabase();
-
-// Manual Sync Button for areas with poor WebSocket connectivity
-function createManualSyncButton() {
-  // Prevent creating multiple buttons
-  if (document.getElementById('manualSyncBtn')) {
-    return;
-  }
-
-  // Create improved manual sync function with debounce
-  window.manualSync = function() {
-    // Prevent multiple simultaneous syncs
-    if (window.syncInProgress) {
-      console.log('⏳ Sync already in progress, ignoring request');
-      return;
-    }
-    
-    window.syncInProgress = true;
-    console.log('🔄 Starting manual sync...');
-    
-    // Show loading state
-    const btn = document.getElementById('manualSyncBtn');
-    if (btn) {
-      btn.textContent = '⏳';
-      btn.disabled = true;
-      btn.style.opacity = '0.7';
-    }
-    
-    // Sync data without triggering notification loops
-    Promise.all([
-      refreshGastosFromSupabase(),
-      refreshReservasFromSupabase()
-    ]).then(() => {
-      console.log('✅ Manual sync completed successfully');
-      window.syncInProgress = false;
-      
-      // Restore button state
-      if (btn) {
-        btn.textContent = '🔄';
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }
-      
-      // Show single success notification
-      if (typeof showNotification === 'function') {
-        showNotification('📊 Datos sincronizados', 'success');
-      }
-      
-    }).catch(error => {
-      console.error('❌ Manual sync failed:', error);
-      window.syncInProgress = false;
-      
-      // Restore button state
-      if (btn) {
-        btn.textContent = '🔄';
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }
-      
-      // Show error notification
-      if (typeof showNotification === 'function') {
-        showNotification('❌ Error al sincronizar', 'error');
-      }
-    });
-  };
-
-  // Create the sync button
-  const syncBtn = document.createElement('button');
-  syncBtn.id = 'manualSyncBtn';
-  syncBtn.textContent = '🔄';
-  syncBtn.style.cssText = `
-    position: fixed; 
-    top: 20px; 
-    right: 20px; 
-    z-index: 9999; 
-    background: var(--magenta); 
-    color: white; 
-    border: none; 
-    padding: 10px 16px; 
-    border-radius: 12px; 
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    transition: all 0.2s ease;
-  `;
-
-  // Add hover and click effects
-  syncBtn.onmouseenter = () => syncBtn.style.transform = 'scale(1.05)';
-  syncBtn.onmouseleave = () => syncBtn.style.transform = 'scale(1)';
-  syncBtn.onmousedown = () => syncBtn.style.transform = 'scale(0.95)';
-  syncBtn.onmouseup = () => syncBtn.style.transform = 'scale(1.05)';
-  
-  // Attach click handler with debounce protection
-  syncBtn.onclick = function() {
-    if (!window.syncInProgress) {
-      window.manualSync();
-    }
-  };
-
-  document.body.appendChild(syncBtn);
-  console.log('✅ Manual sync button created (spam-protected)');
-}
-
-// Create manual sync button after app loads, with delay to ensure DOM is ready
-setTimeout(createManualSyncButton, 3000);
 
 // Request notification permission on load
 setTimeout(() => {
